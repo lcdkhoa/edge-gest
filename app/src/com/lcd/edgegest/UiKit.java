@@ -5,6 +5,8 @@ import android.content.res.Configuration;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.Path;
+import android.graphics.Shader;
+import android.graphics.SweepGradient;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.view.Gravity;
@@ -140,9 +142,11 @@ final class UiKit {
         left.setOrientation(LinearLayout.VERTICAL);
         left.setPadding(0, 0, dp(10), 0);
         left.addView(text(titleStr, 13, cText, true));
-        TextView sub = text(subStr, 11, cMuted, false);
-        sub.setPadding(0, dp(1), 0, 0);
-        left.addView(sub);
+        if (subStr != null && !subStr.isEmpty()) {
+            TextView sub = text(subStr, 11, cMuted, false);
+            sub.setPadding(0, dp(1), 0, 0);
+            left.addView(sub);
+        }
         row.addView(left, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         return row;
     }
@@ -163,6 +167,43 @@ final class UiKit {
         v.setLayoutParams(new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(dpVal)));
         return v;
+    }
+
+    LinearLayout makeLangPill(boolean vi, Button[] viOut, Button[] enOut, View.OnClickListener listener) {
+        LinearLayout pill = new LinearLayout(ctx);
+        pill.setOrientation(LinearLayout.HORIZONTAL);
+        pill.setBackground(roundRect(cSub, cBorder, 10));
+        int p = dp(2);
+        pill.setPadding(p, p, p, p);
+
+        Button viBtn = langBtn("VI", vi, listener);
+        Button enBtn = langBtn("EN", !vi, listener);
+        pill.addView(viBtn, new LinearLayout.LayoutParams(dp(34), dp(26)));
+        LinearLayout.LayoutParams enLp = new LinearLayout.LayoutParams(dp(34), dp(26));
+        enLp.leftMargin = dp(2);
+        pill.addView(enBtn, enLp);
+
+        viOut[0] = viBtn;
+        enOut[0] = enBtn;
+        return pill;
+    }
+
+    private Button langBtn(String label, boolean active, View.OnClickListener listener) {
+        Button b = new Button(ctx);
+        b.setText(label);
+        b.setAllCaps(false);
+        b.setTextSize(11);
+        b.setTypeface(Typeface.DEFAULT_BOLD);
+        b.setPadding(0, 0, 0, 0);
+        b.setMinWidth(0);
+        b.setMinimumWidth(0);
+        b.setMinHeight(0);
+        b.setMinimumHeight(0);
+        b.setStateListAnimator(null);
+        b.setBackground(roundRect(active ? cPrimary : 0, 0, 8));
+        b.setTextColor(active ? 0xFFFFFFFF : cMuted);
+        b.setOnClickListener(listener);
+        return b;
     }
 
     LinearLayout makeBottomBar(Button cancelBtn, Button applyBtn) {
@@ -213,6 +254,69 @@ final class UiKit {
             path.lineTo(w * 0.50f, h * 0.625f);
             path.lineTo(w * 0.75f, h * 0.375f);
             canvas.drawPath(path, paint);
+        }
+    }
+
+    static final class BackArrowView extends View {
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Path path = new Path();
+
+        BackArrowView(Context ctx, int color, float density) {
+            super(ctx);
+            paint.setColor(color);
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeCap(Paint.Cap.ROUND);
+            paint.setStrokeJoin(Paint.Join.ROUND);
+            paint.setStrokeWidth(Math.max(2f, 2.2f * density));
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+            float w = getWidth(), h = getHeight();
+            if (w <= 0 || h <= 0) return;
+            float cx = w * 0.5f, cy = h * 0.5f;
+            float hw = Math.min(w, h) * 0.24f;
+            float ah = hw * 0.85f;
+            path.reset();
+            path.moveTo(cx + hw, cy);
+            path.lineTo(cx - hw, cy);
+            path.moveTo(cx - hw + ah, cy - ah);
+            path.lineTo(cx - hw, cy);
+            path.lineTo(cx - hw + ah, cy + ah);
+            canvas.drawPath(path, paint);
+        }
+    }
+
+    static final class RainbowDotView extends View {
+        private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint border = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private Shader shader;
+
+        RainbowDotView(Context ctx, int borderColor, float density) {
+            super(ctx);
+            border.setStyle(Paint.Style.STROKE);
+            border.setColor(borderColor);
+            border.setStrokeWidth(Math.max(1f, density));
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+            float w = getWidth(), h = getHeight();
+            if (w <= 0 || h <= 0) return;
+            float cx = w / 2f, cy = h / 2f;
+            float r = Math.min(w, h) / 2f - border.getStrokeWidth();
+            if (shader == null) {
+                int[] cols = {
+                    0xFFEF4444, 0xFFEAB308, 0xFF22C55E,
+                    0xFF06B6D4, 0xFF3B82F6, 0xFFA855F7, 0xFFEF4444
+                };
+                shader = new SweepGradient(cx, cy, cols, null);
+                fill.setShader(shader);
+            }
+            canvas.drawCircle(cx, cy, r, fill);
+            canvas.drawCircle(cx, cy, r, border);
         }
     }
 

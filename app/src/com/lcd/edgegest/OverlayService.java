@@ -103,9 +103,10 @@ public final class OverlayService extends Service implements DisplayManager.Disp
             ch.setShowBadge(false);
             nm.createNotificationChannel(ch);
         }
+        boolean vi = Strings.isVi(this);
         Notification n = new Notification.Builder(this, CH_ID)
-                .setContentTitle("EdgeGest đang chạy")
-                .setContentText("Gesture điều hướng ở mép màn hình")
+                .setContentTitle(vi ? "EdgeGest đang chạy" : "EdgeGest running")
+                .setContentText(vi ? "Gesture điều hướng ở mép màn hình" : "Screen edge navigation active")
                 .setSmallIcon(android.R.drawable.ic_menu_compass)
                 .setOngoing(true)
                 .build();

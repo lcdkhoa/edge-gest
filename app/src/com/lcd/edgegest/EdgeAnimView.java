@@ -1,23 +1,25 @@
 package com.lcd.edgegest;
 
 import android.content.Context;
+import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Path;
+import android.graphics.RectF;
 import android.view.View;
 
 /**
- * Cửa sổ hiệu ứng (FLAG_NOT_TOUCHABLE) vẽ dải cong + biểu tượng khi người dùng kéo từ mép.
+ * Cửa sổ hiệu ứng (FLAG_NOT_TOUCHABLE) vẽ dải cong + biểu tượng vector/app khi người dùng kéo từ mép.
  * Hỗ trợ tuỳ chỉnh màu sắc, độ vươn rộng, độ dài dải và độ trong suốt (%).
- * Cũng được dùng chung hàm vẽ cho phần Preview trong AnimConfigActivity.
+ * Dùng chung hàm drawIndicator cho khung Preview trong AnimConfigActivity.
  */
 final class EdgeAnimView extends View {
     private final int edge;
     private final float density;
     private final Paint fillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint iconPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint iconFillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Path path = new Path();
     private final HideTask hideTask;
 
@@ -31,7 +33,9 @@ final class EdgeAnimView extends View {
     private float anchorX;
     private boolean armed;
     private boolean holdActive;
-    private String badge = "";
+    private String actionKey = "";
+    private String cachedAppPkg = "";
+    private Bitmap cachedAppBmp;
 
     EdgeAnimView(Context ctx, int edge, float density,
             int baseColor, int widthDp, int lengthDp, int alphaPct) {
@@ -48,12 +52,11 @@ final class EdgeAnimView extends View {
         iconPaint.setStyle(Paint.Style.STROKE);
         iconPaint.setStrokeCap(Paint.Cap.ROUND);
         iconPaint.setStrokeJoin(Paint.Join.ROUND);
-        iconPaint.setStrokeWidth(2.4f * density);
+        iconPaint.setStrokeWidth(2.3f * density);
         iconPaint.setColor(0xFFFFFFFF);
 
-        textPaint.setColor(0xFFFFFFFF);
-        textPaint.setTextAlign(Paint.Align.CENTER);
-        textPaint.setTextSize(12f * density);
+        iconFillPaint.setStyle(Paint.Style.FILL);
+        iconFillPaint.setColor(0xFFFFFFFF);
         setVisibility(GONE);
     }
 
@@ -65,14 +68,29 @@ final class EdgeAnimView extends View {
         invalidate();
     }
 
-    void update(float progress, float localX, float localY, boolean armed, boolean holdActive, String badge) {
+    void update(float progress, float localX, float localY, boolean armed, boolean holdActive, String actionKey) {
         removeCallbacks(hideTask);
         this.progress = Math.max(0f, Math.min(1f, progress));
         this.anchorX = localX;
         this.anchorY = localY;
         this.armed = armed;
         this.holdActive = holdActive;
-        this.badge = badge == null ? "" : badge;
+        this.actionKey = actionKey == null ? "" : actionKey;
+
+        if (this.actionKey.startsWith(GestureActions.APP_PREFIX)
+                && this.actionKey.length() > GestureActions.APP_PREFIX.length()) {
+            String pkg = this.actionKey.substring(GestureActions.APP_PREFIX.length());
+            if (!pkg.equals(cachedAppPkg)) {
+                cachedAppPkg = pkg;
+                if (cachedAppBmp != null) {
+                    cachedAppBmp.recycle();
+                    cachedAppBmp = null;
+                }
+                int px = Math.max(24, Math.round(28f * density));
+                cachedAppBmp = ActionIcons.buildCircularAppBitmap(
+                        ActionIcons.loadAppIcon(getContext(), pkg), px);
+            }
+        }
         if (getVisibility() != VISIBLE) {
             setAlpha(1f);
             setVisibility(VISIBLE);
@@ -90,17 +108,18 @@ final class EdgeAnimView extends View {
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
         if (progress <= 0.02f) return;
+        Bitmap appBmp = holdActive && actionKey.startsWith(GestureActions.APP_PREFIX) ? cachedAppBmp : null;
         drawIndicator(canvas, getWidth(), getHeight(), edge, density,
                 baseColor, widthDp, lengthDp, alphaPct,
-                progress, anchorX, anchorY, armed, holdActive, badge,
-                fillPaint, iconPaint, textPaint, path);
+                progress, anchorX, anchorY, armed, holdActive, actionKey, appBmp,
+                fillPaint, iconPaint, iconFillPaint, path);
     }
 
     static void drawIndicator(Canvas canvas, int w, int h, int edge, float density,
             int baseColor, int widthDp, int lengthDp, int alphaPct,
             float progress, float anchorX, float anchorY,
-            boolean armed, boolean holdActive, String badge,
-            Paint fillPaint, Paint iconPaint, Paint textPaint, Path path) {
+            boolean armed, boolean holdActive, String actionKey, Bitmap appBitmap,
+            Paint fillPaint, Paint iconPaint, Paint iconFillPaint, Path path) {
         int rgb = holdActive ? 0xD97706 : (armed ? (baseColor & 0x00FFFFFF) : 0x1E242B);
         float maxA = Math.max(0.15f, Math.min(1f, alphaPct / 100f));
         float aFrac = armed ? maxA : maxA * 0.78f;
@@ -110,15 +129,17 @@ final class EdgeAnimView extends View {
         if (edge == StripView.BOTTOM) {
             float pillW = (lengthDp * 0.78f + 22f * progress) * density;
             pillW = Math.min(w * 0.85f, pillW);
-            float pillH = (Math.max(12f, widthDp * 0.48f) + 6f * progress) * density;
+            float pillH = (Math.max(18f, widthDp * 0.48f) + 6f * progress) * density;
             float cx = Math.max(pillW * 0.55f, Math.min(w - pillW * 0.55f, anchorX));
             float cy = h - (10f + 16f * progress) * density;
             float r = pillH / 2f;
             canvas.drawRoundRect(cx - pillW / 2f, cy - r, cx + pillW / 2f, cy + r, r, r, fillPaint);
 
-            if (armed && badge != null && !badge.isEmpty()) {
-                Paint.FontMetrics fm = textPaint.getFontMetrics();
-                canvas.drawText(badge, cx, cy - (fm.ascent + fm.descent) / 2f, textPaint);
+            if (armed && actionKey != null && !actionKey.isEmpty()) {
+                iconPaint.setAlpha(255);
+                iconFillPaint.setAlpha(255);
+                float sz = Math.min(18f * density, pillH * 0.65f);
+                ActionIcons.drawVector(canvas, actionKey, cx, cy, sz, iconPaint, iconFillPaint, path);
             }
             return;
         }
@@ -146,23 +167,22 @@ final class EdgeAnimView extends View {
 
         if (progress > 0.2f) {
             float cx = edge == StripView.LEFT ? bulge * 0.52f : w - bulge * 0.52f;
-            if (holdActive && badge != null && !badge.isEmpty()) {
-                Paint.FontMetrics fm = textPaint.getFontMetrics();
-                canvas.drawText(badge, cx, cy - (fm.ascent + fm.descent) / 2f, textPaint);
-            } else {
-                float r = Math.min(6.5f * density, bulge * 0.22f);
-                path.reset();
-                if (edge == StripView.LEFT) {
-                    path.moveTo(cx + r * 0.45f, cy - r);
-                    path.lineTo(cx - r * 0.45f, cy);
-                    path.lineTo(cx + r * 0.45f, cy + r);
+            if (holdActive && GestureActions.isEnabled(actionKey)) {
+                if (appBitmap != null) {
+                    float sz = Math.min(26f * density, bulge * 0.54f);
+                    RectF dst = new RectF(cx - sz / 2f, cy - sz / 2f, cx + sz / 2f, cy + sz / 2f);
+                    canvas.drawBitmap(appBitmap, null, dst, null);
                 } else {
-                    path.moveTo(cx - r * 0.45f, cy - r);
-                    path.lineTo(cx + r * 0.45f, cy);
-                    path.lineTo(cx - r * 0.45f, cy + r);
+                    iconPaint.setAlpha(255);
+                    iconFillPaint.setAlpha(255);
+                    float sz = Math.min(22f * density, bulge * 0.44f);
+                    ActionIcons.drawVector(canvas, actionKey, cx, cy, sz, iconPaint, iconFillPaint, path);
                 }
+            } else {
                 iconPaint.setAlpha(armed ? 255 : 195);
-                canvas.drawPath(path, iconPaint);
+                float sz = Math.min(18f * density, bulge * 0.42f);
+                String chev = edge == StripView.LEFT ? "_back_left" : "_back_right";
+                ActionIcons.drawVector(canvas, chev, cx, cy, sz, iconPaint, iconFillPaint, path);
             }
         }
     }

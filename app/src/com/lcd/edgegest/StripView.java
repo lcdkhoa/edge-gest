@@ -131,15 +131,15 @@ final class StripView extends View {
 
     void updateAnim(float prog, float localX, float localY) {
         if (animView == null) return;
-        String badge = "";
+        String actionKey = "";
         if (edge == BOTTOM) {
-            if (armed == SWITCH) badge = "⇄";
-            else if (holdFired) badge = "▢";
-            else if (armed == HOME) badge = "⌂";
+            if (armed == SWITCH) actionKey = GestureActions.SWITCH;
+            else if (holdFired) actionKey = GestureActions.RECENTS;
+            else if (armed == HOME) actionKey = GestureActions.HOME;
         } else if (holdFired) {
-            badge = GestureActions.shortBadge(holdAction);
+            actionKey = holdAction;
         }
-        animView.update(prog, localX, localY, armed != NONE, holdFired, badge);
+        animView.update(prog, localX, localY, armed != NONE, holdFired, actionKey);
     }
 
     private void fire() {

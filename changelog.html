@@ -516,6 +516,20 @@
       notes: "Tạo `AnimConfigActivity` (bật/tắt animation từng mép Trái/Phải/Dưới, chọn màu 6 mẫu + mã hex, chỉnh độ rộng/độ dài/độ trong suốt % với preview tương tác dùng chung `EdgeAnimView.drawIndicator`). Cập nhật `OverlayService` lưu và áp dụng đầy đủ tham số animation. Tách `UiKit` và thiết kế lại `MainActivity` với nút `Áp dụng mục này` cho từng section, thanh `Hủy / Áp dụng tất cả` ghim ở bottom, mục `Sao lưu & Khôi phục` chọn từng phần config qua `ConfigBackup` (SAF file JSON hoặc Clipboard), và đổi badge nguồn từ ký tự tofu sang `PWR` trong `GestureActions`.",
       tags: ["UI", "Feature", "Animation", "Backup"],
     },
+    {
+      id: "D-16",
+      date: "2026-11-25",
+      decision: "**UI v3: Sticky Preview trên `AnimConfigActivity`, bộ icon riêng cho hành động & từng app (`ActionIcons`), và đa ngôn ngữ EN/VI (`Strings`)**",
+      notes: "Đưa khung `Preview trực tiếp` ra khỏi `ScrollView` của `AnimConfigActivity` (ghim cố định dưới AppBar) kèm kéo thử cảm ứng trực tiếp. Tạo `ActionIcons` vẽ icon vector riêng cho từng hành động (`power`, `switch`, `recents`, `home`, `volume`, `notif`, `qs`, `screenshot`, `lock`, `media`) và render icon thật từ `PackageManager` cho `app:<pkg>` trên `EdgeAnimView`, hàng chọn trong `MainActivity`, picker hành động (`ActionListAdapter`) và picker app có ô tìm kiếm (`AppListAdapter`). Thêm `Strings` + nút chuyển nhanh `VI / EN` trên `MainActivity` và `AnimConfigActivity`, giữ trạng thái nhập khi `recreate()`.",
+      tags: ["UI", "Icons", "i18n", "Animation"],
+    },
+    {
+      id: "D-17",
+      date: "2026-11-25",
+      decision: "**UI v4: Vector `BackArrowView`, Bánh xe màu HSV (`ColorWheelView`), bỏ pill ở tiêu đề section & lược bỏ helper text thừa**",
+      notes: "Thêm `UiKit.BackArrowView` và `UiKit.RainbowDotView`; nâng `AnimConfigActivity` với nút Back vector cân giữa, thay dialog hex đơn lẻ bằng hộp thoại Bánh xe màu HSV (`ColorWheelView` dùng `SweepGradient` + `RadialGradient`, thanh độ sáng `SeekBar` và ô `#RRGGBB` đồng bộ 2 chiều). Trong `MainActivity` và `AnimConfigActivity`, tắt pill tóm tắt cạnh tiêu đề các mục collapsible, bỏ dấu `→` rớt dòng và ẩn các mô tả helper text dư thừa.",
+      tags: ["UI", "Icons", "Animation"],
+    },
   ];
   // <</DECISIONS>>
 

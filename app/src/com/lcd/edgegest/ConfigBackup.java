@@ -65,7 +65,7 @@ final class ConfigBackup {
     }
 
     static String importJson(SharedPreferences prefs, String raw,
-            boolean incGeom, boolean incHold, boolean incAnim) throws Exception {
+            boolean incGeom, boolean incHold, boolean incAnim, boolean vi) throws Exception {
         JSONObject root = new JSONObject(raw);
         SharedPreferences.Editor ed = prefs.edit();
         StringBuilder applied = new StringBuilder();
@@ -76,14 +76,14 @@ final class ConfigBackup {
             if (g.has("bottom")) ed.putInt("bottom", OverlayService.clamp(g.getInt("bottom"), 8, 120));
             if (g.has("topGuard")) ed.putInt("topGuard", OverlayService.clamp(g.getInt("topGuard"), 0, 50));
             if (g.has("bottomGap")) ed.putInt("bottomGap", OverlayService.clamp(g.getInt("bottomGap"), 0, 400));
-            applied.append("Vùng mép, ");
+            applied.append(vi ? "Vùng mép, " : "Geometry, ");
         }
         if (incHold && root.has("hold")) {
             JSONObject h = root.getJSONObject("hold");
             if (h.has("leftHold")) ed.putString("leftHold", h.getString("leftHold"));
             if (h.has("rightHold")) ed.putString("rightHold", h.getString("rightHold"));
             if (h.has("holdMs")) ed.putInt("holdMs", OverlayService.clamp(h.getInt("holdMs"), 180, 800));
-            applied.append("Nhấn giữ, ");
+            applied.append(vi ? "Nhấn giữ, " : "Hold, ");
         }
         if (incAnim && root.has("anim")) {
             JSONObject a = root.getJSONObject("anim");
@@ -104,8 +104,10 @@ final class ConfigBackup {
             applied.append("Animation, ");
         }
         ed.apply();
-        if (applied.length() == 0) return "Không có phần khớp để khôi phục";
+        if (applied.length() == 0) {
+            return vi ? "Không có phần khớp để khôi phục" : "No matching section to restore";
+        }
         applied.setLength(applied.length() - 2);
-        return "Đã khôi phục: " + applied;
+        return (vi ? "Đã khôi phục: " : "Restored: ") + applied;
     }
 }
