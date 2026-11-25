@@ -32,6 +32,10 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".AnimConfigActivity"
+            android:exported="false" />
+
         <service
             android:name=".OverlayService"
             android:exported="true" />

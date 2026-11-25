@@ -502,6 +502,20 @@
       notes: "Xác minh qua `uiautomator dump` trên máy `c92b13cf`: khi thu gọn mục khiến tổng chiều cao nhỏ hơn màn hình, `ScrollView.setFillViewport(true)` chuyển `MeasureSpec` từ `UNSPECIFIED` sang `AT_MOST`/`EXACTLY`; `View` trống (`vSpace`) không có `LayoutParams.height` cố định nên `View.getDefaultSize` giãn ra chiếm toàn bộ chiều cao (`2066px`), đẩy phần UI bên dưới ra khỏi màn hình. Đã đặt `LayoutParams(MATCH_PARENT, dp(dpVal))` cho `vSpace()` và bỏ `setFillViewport(true)`.",
       tags: ["UI"],
     },
+    {
+      id: "D-14",
+      date: "2026-11-25",
+      decision: "**Ghi nhận TODO sao lưu Google cá nhân vào `README.md` & dựng HTML preview v2 (Sub-screen Animation, Apply theo phần, Sticky Bottom Bar, Backup/Restore)**",
+      notes: "Bổ sung mục TODO đồng bộ/sao lưu cấu hình lên tài khoản Google cá nhân khi được cấp quyền trong `README.md`. Tạo bản xem trước HTML tương tác (`ui-preview-v2.html`) trước khi code Java cho: sub-screen tuỳ chỉnh animation (trái/phải/dưới, màu sắc, độ rộng/dài, độ trong suốt %, preview kéo trực tiếp), apply riêng từng phần hoặc qua thanh `Hủy / Áp dụng` ghim ở bottom, và Backup/Restore JSON chọn từng phần config.",
+      tags: ["Docs", "UI"],
+    },
+    {
+      id: "D-15",
+      date: "2026-11-25",
+      decision: "**Hoàn thiện UI v2: Sub-screen `AnimConfigActivity`, Apply theo từng phần + Bottom Bar, Backup/Restore JSON (`ConfigBackup`), tách `UiKit` và sửa glyph PWR**",
+      notes: "Tạo `AnimConfigActivity` (bật/tắt animation từng mép Trái/Phải/Dưới, chọn màu 6 mẫu + mã hex, chỉnh độ rộng/độ dài/độ trong suốt % với preview tương tác dùng chung `EdgeAnimView.drawIndicator`). Cập nhật `OverlayService` lưu và áp dụng đầy đủ tham số animation. Tách `UiKit` và thiết kế lại `MainActivity` với nút `Áp dụng mục này` cho từng section, thanh `Hủy / Áp dụng tất cả` ghim ở bottom, mục `Sao lưu & Khôi phục` chọn từng phần config qua `ConfigBackup` (SAF file JSON hoặc Clipboard), và đổi badge nguồn từ ký tự tofu sang `PWR` trong `GestureActions`.",
+      tags: ["UI", "Feature", "Animation", "Backup"],
+    },
   ];
   // <</DECISIONS>>
 

@@ -136,6 +136,9 @@ changelog.html               nhật ký thay đổi & quyết định kỹ thu�
 1. Kiểm tra giao diện `MainActivity` mới trên HyperOS, cấp quyền Shizuku trong app và thử reboot máy để xác nhận `BootReceiver` + Shizuku tự bật lại đầy đủ.
 2. Mở app ngân hàng (vd. VCB / BVBank / MoMo) để xác nhận chế độ `--hybrid` tự fallback mượt mà nếu overlay bị ẩn, và tinh chỉnh `topGuard`/`bottomGap` theo thói quen gõ phím.
 
+**TODO tính năng tiếp theo:**
+- Hỗ trợ sao lưu / đồng bộ cấu hình từng phần lên **tài khoản Google cá nhân** (Google Drive AppData) của từng người dùng khi được cấp quyền OAuth tương ứng.
+
 ## Ghi chú kỹ thuật (các ngõ đã thử & loại)
 - Overlay từ chính helper `app_process`: `WindowManagerService` chặn "Unknown pid uid=2000"
   (process không được ATM đăng ký) → phải tách overlay ra APK cài đặt.

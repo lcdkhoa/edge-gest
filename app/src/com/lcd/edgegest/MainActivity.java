@@ -10,13 +10,8 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
-import android.content.res.Configuration;
-import android.graphics.Canvas;
 import android.graphics.Color;
-import android.graphics.Paint;
-import android.graphics.Path;
 import android.graphics.Typeface;
-import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -28,8 +23,8 @@ import android.text.InputType;
 import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.View;
-import android.view.WindowInsets;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.CompoundButton;
 import android.widget.EditText;
 import android.widget.LinearLayout;
@@ -38,17 +33,28 @@ import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.io.BufferedReader;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 
 /**
- * Màn hình cấu hình theo nhóm options có collapsible.
- * Tuân thủ ràng buộc d8 34.0.0: chỉ dùng static nested class với constructor tường minh,
- * không dùng lambda, anonymous class hay non-static inner class.
+ * Màn hình cấu hình theo nhóm options có collapsible:
+ * - Apply riêng từng phần hoặc qua thanh Hủy / Áp dụng ghim ở bottom
+ * - Sub-screen AnimConfigActivity tuỳ chỉnh animation kéo mép
+ * - Sao lưu / Khôi phục JSON chọn lọc theo từng phần cấu hình
+ *
+ * Tuân thủ ràng buộc d8 34.0.0: chỉ dùng static nested class với constructor tường minh.
  */
 public final class MainActivity extends Activity implements View.OnClickListener {
+    private static final int REQ_ANIM = 201;
+    private static final int REQ_BACKUP_FILE = 202;
+    private static final int REQ_RESTORE_FILE = 203;
+
     private static final String CMD_ADB_START = "adb shell sh /data/local/tmp/edgegest/start-server.sh";
     private static final String CMD_ADB_GRANT = "adb shell \"appops set com.lcd.edgegest SYSTEM_ALERT_WINDOW allow; "
             + "pm grant com.lcd.edgegest moe.shizuku.manager.permission.API_V23; "
@@ -56,22 +62,25 @@ public final class MainActivity extends Activity implements View.OnClickListener
             + "pm grant com.lcd.edgegest android.permission.ACCESS_LOCAL_NETWORK\"";
     private static final String CMD_ADB_FSG0 = "adb shell settings put global force_fsg_nav_bar 0";
 
-    private boolean dark;
-    private int cBg, cCard, cSub, cBorder, cText, cMuted, cPrimary;
-    private int cOkFg, cOkBg, cWarnFg, cWarnBg, cErrFg, cErrBg;
-
+    private UiKit ui;
     private TextView overallBadge;
     private TextView ovVal, svcVal, helperVal, shzVal;
     private TextView permSummary, geomSummary, holdSummary, visualSummary;
     private TextView ovActionLabel, helperDesc;
-    private TextView leftHoldDesc, rightHoldDesc;
+    private TextView leftHoldDesc, rightHoldDesc, animSubLine;
+    private View animSwatchDot;
     private LinearLayout permBody;
-    private ChevronView permChevron;
+    private UiKit.ChevronView permChevron;
 
     private EditText sideEt, bottomEt, topGuardEt, bottomGapEt, holdMsEt;
-    private Switch animSw, debugSw;
-    private Button applyBtn, stopBtn, grantBtn, shizukuBtn, appInfoBtn, resetBtn;
-    private Button leftHoldBtn, rightHoldBtn;
+    private Switch debugSw;
+    private CheckBox bkGeomCb, bkHoldCb, bkAnimCb;
+
+    private Button svcOnBtn, svcOffBtn, grantBtn, shizukuBtn, appInfoBtn;
+    private Button resetGeomBtn, applyGeomBtn, applyHoldBtn, applyVisualBtn;
+    private Button leftHoldBtn, rightHoldBtn, openAnimBtn;
+    private Button exportFileBtn, importFileBtn, copyJsonBtn, pasteJsonBtn;
+    private Button bottomCancelBtn, bottomApplyBtn;
 
     Handler uiHandler;
     String leftHoldAction = GestureActions.NONE;
@@ -84,38 +93,55 @@ public final class MainActivity extends Activity implements View.OnClickListener
     protected void onCreate(Bundle b) {
         super.onCreate(b);
         if (getActionBar() != null) getActionBar().hide();
+        ui = new UiKit(this);
         uiHandler = new Handler(Looper.getMainLooper());
-        initPalette();
 
         SharedPreferences prefs = getSharedPreferences(OverlayService.PREFS, MODE_PRIVATE);
-        leftHoldAction = prefs.getString("leftHold", OverlayService.DEF_LEFT_HOLD);
-        rightHoldAction = prefs.getString("rightHold", OverlayService.DEF_RIGHT_HOLD);
 
-        ScrollView scroll = new ScrollView(this);
-        scroll.setBackgroundColor(cBg);
+        LinearLayout outer = new LinearLayout(this);
+        outer.setOrientation(LinearLayout.VERTICAL);
+        outer.setBackgroundColor(ui.cBg);
         if (Build.VERSION.SDK_INT >= 20) {
-            scroll.setOnApplyWindowInsetsListener(new InsetPadding());
+            outer.setOnApplyWindowInsetsListener(new UiKit.InsetPadding());
         }
 
+        ScrollView scroll = new ScrollView(this);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        int pad = dp(16);
-        root.setPadding(pad, pad, pad, dp(28));
+        int pad = ui.dp(14);
+        root.setPadding(pad, pad, pad, ui.dp(18));
 
         buildHeroCard(root);
-        root.addView(vSpace(12));
+        root.addView(ui.vSpace(10));
         buildPermissionsSection(root);
-        root.addView(vSpace(10));
+        root.addView(ui.vSpace(10));
         buildGeometrySection(root, prefs);
-        root.addView(vSpace(10));
+        root.addView(ui.vSpace(10));
         buildHoldActionsSection(root, prefs);
-        root.addView(vSpace(10));
+        root.addView(ui.vSpace(10));
         buildVisualSection(root, prefs);
-        root.addView(vSpace(10));
+        root.addView(ui.vSpace(10));
+        buildBackupSection(root);
+        root.addView(ui.vSpace(10));
         buildDiagnosticsSection(root);
 
         scroll.addView(root);
-        setContentView(scroll);
+        outer.addView(scroll, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+
+        View botDiv = new View(this);
+        botDiv.setBackgroundColor(ui.cBorder);
+        outer.addView(botDiv, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, Math.max(1, ui.dp(1))));
+
+        bottomCancelBtn = ui.actionButton("Hủy", ui.cSub, ui.cText, ui.cBorder);
+        bottomCancelBtn.setOnClickListener(this);
+        bottomApplyBtn = ui.actionButton("Áp dụng tất cả", ui.cPrimary, Color.WHITE, 0);
+        bottomApplyBtn.setOnClickListener(this);
+        outer.addView(ui.makeBottomBar(bottomCancelBtn, bottomApplyBtn));
+
+        setContentView(outer);
+        loadFromPrefs();
 
         if (Settings.canDrawOverlays(this) && !OverlayService.running) {
             startOverlayService();
@@ -137,26 +163,8 @@ public final class MainActivity extends Activity implements View.OnClickListener
         refresh();
     }
 
-    private void initPalette() {
-        int night = getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK;
-        dark = (night == Configuration.UI_MODE_NIGHT_YES);
-        if (dark) {
-            cBg = 0xFF111315; cCard = 0xFF1B1E22; cSub = 0xFF24282E; cBorder = 0xFF2E333B;
-            cText = 0xFFEEF0F3; cMuted = 0xFF9BA2AD; cPrimary = 0xFF3B82F6;
-            cOkFg = 0xFF4ADE80; cOkBg = 0xFF142E20;
-            cWarnFg = 0xFFFBBF24; cWarnBg = 0xFF2E2412;
-            cErrFg = 0xFFF87171; cErrBg = 0xFF31181A;
-        } else {
-            cBg = 0xFFF4F5F7; cCard = 0xFFFFFFFF; cSub = 0xFFF7F8FA; cBorder = 0xFFE2E5EA;
-            cText = 0xFF181A1F; cMuted = 0xFF646B75; cPrimary = 0xFF2563EB;
-            cOkFg = 0xFF15803D; cOkBg = 0xFFDCFCE7;
-            cWarnFg = 0xFFB45309; cWarnBg = 0xFFFEF3C7;
-            cErrFg = 0xFFB91C1C; cErrBg = 0xFFFEE2E2;
-        }
-    }
-
     private void buildHeroCard(LinearLayout root) {
-        LinearLayout card = makeCard();
+        LinearLayout card = ui.makeCard();
 
         LinearLayout header = new LinearLayout(this);
         header.setOrientation(LinearLayout.HORIZONTAL);
@@ -164,17 +172,16 @@ public final class MainActivity extends Activity implements View.OnClickListener
 
         LinearLayout titleBox = new LinearLayout(this);
         titleBox.setOrientation(LinearLayout.VERTICAL);
-        TextView title = text("EdgeGest", 20, cText, true);
-        TextView sub = text("Điều hướng mép · Không Root / Accessibility", 12, cMuted, false);
-        sub.setPadding(0, dp(2), 0, 0);
-        titleBox.addView(title);
+        titleBox.addView(ui.text("EdgeGest", 20, ui.cText, true));
+        TextView sub = ui.text("Điều hướng mép · Không Root / Accessibility", 12, ui.cMuted, false);
+        sub.setPadding(0, ui.dp(2), 0, 0);
         titleBox.addView(sub);
         header.addView(titleBox, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
 
-        overallBadge = pill("Đang kiểm tra", cMuted, cSub);
+        overallBadge = ui.pill("Đang kiểm tra", ui.cMuted, ui.cSub);
         header.addView(overallBadge);
         card.addView(header);
-        card.addView(vSpace(12));
+        card.addView(ui.vSpace(10));
 
         TextView[] out = new TextView[1];
         LinearLayout row1 = new LinearLayout(this);
@@ -184,7 +191,7 @@ public final class MainActivity extends Activity implements View.OnClickListener
         row1.addView(statusCell("Dải mép", out), rowCellLp(false));
         svcVal = out[0];
         card.addView(row1);
-        card.addView(vSpace(8));
+        card.addView(ui.vSpace(8));
 
         LinearLayout row2 = new LinearLayout(this);
         row2.setOrientation(LinearLayout.HORIZONTAL);
@@ -193,21 +200,20 @@ public final class MainActivity extends Activity implements View.OnClickListener
         row2.addView(statusCell("Shizuku", out), rowCellLp(false));
         shzVal = out[0];
         card.addView(row2);
-        card.addView(vSpace(14));
+        card.addView(ui.vSpace(12));
 
         LinearLayout actions = new LinearLayout(this);
         actions.setOrientation(LinearLayout.HORIZONTAL);
 
-        applyBtn = actionButton("BẬT / Áp dụng", cPrimary, Color.WHITE, 0);
-        applyBtn.setOnClickListener(this);
-        LinearLayout.LayoutParams applyLp = new LinearLayout.LayoutParams(0, dp(42), 2f);
-        applyLp.rightMargin = dp(8);
-        actions.addView(applyBtn, applyLp);
+        svcOnBtn = ui.actionButton("Bật Overlay", ui.cPrimary, Color.WHITE, 0);
+        svcOnBtn.setOnClickListener(this);
+        LinearLayout.LayoutParams onLp = new LinearLayout.LayoutParams(0, ui.dp(40), 1f);
+        onLp.rightMargin = ui.dp(8);
+        actions.addView(svcOnBtn, onLp);
 
-        stopBtn = actionButton("TẮT", cSub, cText, cBorder);
-        stopBtn.setOnClickListener(this);
-        LinearLayout.LayoutParams stopLp = new LinearLayout.LayoutParams(0, dp(42), 1f);
-        actions.addView(stopBtn, stopLp);
+        svcOffBtn = ui.actionButton("Tắt Overlay", ui.cSub, ui.cText, ui.cBorder);
+        svcOffBtn.setOnClickListener(this);
+        actions.addView(svcOffBtn, new LinearLayout.LayoutParams(0, ui.dp(40), 1f));
 
         card.addView(actions);
         root.addView(card);
@@ -215,31 +221,31 @@ public final class MainActivity extends Activity implements View.OnClickListener
 
     private void buildPermissionsSection(LinearLayout root) {
         TextView[] badgeOut = new TextView[1];
-        ChevronView[] chevOut = new ChevronView[1];
+        UiKit.ChevronView[] chevOut = new UiKit.ChevronView[1];
         permBody = makeCollapsibleSection(root, "Quyền & Helper",
                 "Overlay, Shizuku, khởi chạy injector", badgeOut, chevOut, true);
         permSummary = badgeOut[0];
         permChevron = chevOut[0];
 
-        LinearLayout r1 = optionRow("Hiển thị trên ứng dụng khác", "App-op SYSTEM_ALERT_WINDOW");
-        ovActionLabel = pill("Đã cấp ✓", cOkFg, cOkBg);
-        grantBtn = compactButton("Cấp quyền", cPrimary, Color.WHITE, 0);
+        LinearLayout r1 = ui.optionRow("Hiển thị trên ứng dụng khác", "App-op SYSTEM_ALERT_WINDOW");
+        ovActionLabel = ui.pill("Đã cấp ✓", ui.cOkFg, ui.cOkBg);
+        grantBtn = ui.compactButton("Cấp quyền", ui.cPrimary, Color.WHITE, 0);
         grantBtn.setOnClickListener(this);
         r1.addView(ovActionLabel);
         r1.addView(grantBtn);
         permBody.addView(r1);
-        permBody.addView(divider());
+        permBody.addView(ui.divider());
 
-        LinearLayout r2 = optionRow("Helper Injector (--server --hybrid)", "Khởi chạy qua Shizuku uid 2000");
+        LinearLayout r2 = ui.optionRow("Helper Injector (--server --hybrid)", "Khởi chạy qua Shizuku uid 2000");
         helperDesc = (TextView) ((LinearLayout) r2.getChildAt(0)).getChildAt(1);
-        shizukuBtn = compactButton("Bật Helper", cSub, cText, cBorder);
+        shizukuBtn = ui.compactButton("Bật Helper", ui.cSub, ui.cText, ui.cBorder);
         shizukuBtn.setOnClickListener(this);
         r2.addView(shizukuBtn);
         permBody.addView(r2);
-        permBody.addView(divider());
+        permBody.addView(ui.divider());
 
-        LinearLayout r3 = optionRow("Tự khởi chạy HyperOS", "Bật Autostart trong Thông tin ứng dụng");
-        appInfoBtn = compactButton("Mở cài đặt", cSub, cText, cBorder);
+        LinearLayout r3 = ui.optionRow("Tự khởi chạy HyperOS", "Bật Autostart trong Thông tin ứng dụng");
+        appInfoBtn = ui.compactButton("Mở cài đặt", ui.cSub, ui.cText, ui.cBorder);
         appInfoBtn.setOnClickListener(this);
         r3.addView(appInfoBtn);
         permBody.addView(r3);
@@ -247,7 +253,7 @@ public final class MainActivity extends Activity implements View.OnClickListener
 
     private void buildGeometrySection(LinearLayout root, SharedPreferences prefs) {
         TextView[] badgeOut = new TextView[1];
-        ChevronView[] chevOut = new ChevronView[1];
+        UiKit.ChevronView[] chevOut = new UiKit.ChevronView[1];
         LinearLayout body = makeCollapsibleSection(root, "Kích thước & Vùng mép",
                 "Độ dày dải vuốt và vùng chừa an toàn", badgeOut, chevOut, true);
         geomSummary = badgeOut[0];
@@ -257,33 +263,40 @@ public final class MainActivity extends Activity implements View.OnClickListener
                 prefs.getInt("side", OverlayService.DEF_SIDE), 8, 120, 4, etOut));
         sideEt = etOut[0];
 
-        body.addView(divider());
+        body.addView(ui.divider());
         body.addView(stepperRow("Độ dày mép dưới", "Home / Recents / Đổi app (8–120 dp)",
                 prefs.getInt("bottom", OverlayService.DEF_BOTTOM), 8, 120, 2, etOut));
         bottomEt = etOut[0];
 
-        body.addView(divider());
+        body.addView(ui.divider());
         body.addView(stepperRow("Chừa mép trên (%)", "Tránh kéo nhầm thanh thông báo (0–50%)",
                 prefs.getInt("topGuard", OverlayService.DEF_TOP_GUARD), 0, 50, 1, etOut));
         topGuardEt = etOut[0];
 
-        body.addView(divider());
+        body.addView(ui.divider());
         body.addView(stepperRow("Chừa thêm trên đáy (dp)", "Thu ngắn dải bên, tránh bàn phím (0–400)",
                 prefs.getInt("bottomGap", OverlayService.DEF_BOTTOM_GAP), 0, 400, 10, etOut));
         bottomGapEt = etOut[0];
 
         LinearLayout foot = new LinearLayout(this);
-        foot.setGravity(Gravity.END);
-        foot.setPadding(0, dp(8), 0, 0);
-        resetBtn = new Button(this);
-        resetBtn.setText("Khôi phục mặc định (40 / 24 / 11% / 0)");
-        resetBtn.setAllCaps(false);
-        resetBtn.setTextSize(12);
-        resetBtn.setTextColor(cPrimary);
-        resetBtn.setBackgroundColor(Color.TRANSPARENT);
-        resetBtn.setPadding(dp(4), dp(4), dp(4), dp(4));
-        resetBtn.setOnClickListener(this);
-        foot.addView(resetBtn);
+        foot.setOrientation(LinearLayout.HORIZONTAL);
+        foot.setGravity(Gravity.CENTER_VERTICAL);
+        foot.setPadding(0, ui.dp(10), 0, 0);
+
+        resetGeomBtn = new Button(this);
+        resetGeomBtn.setText("Mặc định (40/24/11%/0)");
+        resetGeomBtn.setAllCaps(false);
+        resetGeomBtn.setTextSize(12);
+        resetGeomBtn.setTextColor(ui.cMuted);
+        resetGeomBtn.setBackgroundColor(Color.TRANSPARENT);
+        resetGeomBtn.setPadding(0, ui.dp(4), ui.dp(8), ui.dp(4));
+        resetGeomBtn.setOnClickListener(this);
+        foot.addView(resetGeomBtn, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+        applyGeomBtn = ui.compactButton("Áp dụng mục này", ui.cOkBg, ui.cPrimary, 0);
+        applyGeomBtn.setBackground(ui.roundRect(ui.cSub, ui.cPrimary, 10));
+        applyGeomBtn.setOnClickListener(this);
+        foot.addView(applyGeomBtn);
         body.addView(foot);
 
         GeometryWatcher watcher = new GeometryWatcher(this);
@@ -291,142 +304,220 @@ public final class MainActivity extends Activity implements View.OnClickListener
         bottomEt.addTextChangedListener(watcher);
         topGuardEt.addTextChangedListener(watcher);
         bottomGapEt.addTextChangedListener(watcher);
-        updateGeometrySummary();
     }
 
     private void buildHoldActionsSection(LinearLayout root, SharedPreferences prefs) {
         TextView[] badgeOut = new TextView[1];
-        ChevronView[] chevOut = new ChevronView[1];
+        UiKit.ChevronView[] chevOut = new UiKit.ChevronView[1];
         LinearLayout body = makeCollapsibleSection(root, "Cử chỉ & Nhấn giữ",
                 "Kéo giữ mép trái / phải: mở app, nguồn, âm lượng...", badgeOut, chevOut, false);
         holdSummary = badgeOut[0];
 
-        LinearLayout rLeft = optionRow("Nhấn giữ mép trái", GestureActions.describe(this, leftHoldAction));
+        LinearLayout rLeft = ui.optionRow("Nhấn giữ mép trái", "");
         leftHoldDesc = (TextView) ((LinearLayout) rLeft.getChildAt(0)).getChildAt(1);
-        leftHoldBtn = compactButton("Chọn", cSub, cText, cBorder);
+        leftHoldBtn = ui.compactButton("Chọn", ui.cSub, ui.cText, ui.cBorder);
         leftHoldBtn.setOnClickListener(this);
         rLeft.addView(leftHoldBtn);
         body.addView(rLeft);
-        body.addView(divider());
+        body.addView(ui.divider());
 
-        LinearLayout rRight = optionRow("Nhấn giữ mép phải", GestureActions.describe(this, rightHoldAction));
+        LinearLayout rRight = ui.optionRow("Nhấn giữ mép phải", "");
         rightHoldDesc = (TextView) ((LinearLayout) rRight.getChildAt(0)).getChildAt(1);
-        rightHoldBtn = compactButton("Chọn", cSub, cText, cBorder);
+        rightHoldBtn = ui.compactButton("Chọn", ui.cSub, ui.cText, ui.cBorder);
         rightHoldBtn.setOnClickListener(this);
         rRight.addView(rightHoldBtn);
         body.addView(rRight);
-        body.addView(divider());
+        body.addView(ui.divider());
 
         EditText[] etOut = new EditText[1];
         body.addView(stepperRow("Thời gian nhấn giữ (ms)", "Mốc kích hoạt hành động phụ & Recents (180–800)",
                 prefs.getInt("holdMs", OverlayService.DEF_HOLD_MS), 180, 800, 20, etOut));
         holdMsEt = etOut[0];
-        updateHoldSummary();
+
+        LinearLayout foot = new LinearLayout(this);
+        foot.setGravity(Gravity.END);
+        foot.setPadding(0, ui.dp(10), 0, 0);
+        applyHoldBtn = ui.compactButton("Áp dụng mục này", ui.cSub, ui.cPrimary, ui.cPrimary);
+        applyHoldBtn.setOnClickListener(this);
+        foot.addView(applyHoldBtn);
+        body.addView(foot);
     }
 
     private void buildVisualSection(LinearLayout root, SharedPreferences prefs) {
         TextView[] badgeOut = new TextView[1];
-        ChevronView[] chevOut = new ChevronView[1];
+        UiKit.ChevronView[] chevOut = new UiKit.ChevronView[1];
         LinearLayout body = makeCollapsibleSection(root, "Hiển thị & Hiệu ứng",
-                "Animation khi vuốt, màu debug & bảng cử chỉ", badgeOut, chevOut, false);
+                "Sub-screen Animation kéo mép, màu debug & bảng cử chỉ", badgeOut, chevOut, false);
         visualSummary = badgeOut[0];
 
-        LinearLayout rAnim = optionRow("Hiệu ứng animation khi vuốt",
-                "Hiện dải cong & biểu tượng khi kéo mép");
-        animSw = new Switch(this);
-        boolean anim = prefs.getBoolean("anim", OverlayService.DEF_ANIM);
-        animSw.setChecked(anim);
-        animSw.setOnCheckedChangeListener(new VisualSwitchListener(this));
-        rAnim.addView(animSw);
-        body.addView(rAnim);
-        body.addView(divider());
+        // Sub-screen launch card
+        LinearLayout animCard = new LinearLayout(this);
+        animCard.setOrientation(LinearLayout.HORIZONTAL);
+        animCard.setGravity(Gravity.CENTER_VERTICAL);
+        animCard.setBackground(ui.roundRect(ui.cSub, ui.cBorder, 12));
+        animCard.setPadding(ui.dp(12), ui.dp(10), ui.dp(12), ui.dp(10));
 
-        LinearLayout rDbg = optionRow("Hiện màu dải cảm ứng (Debug)",
+        animSwatchDot = new View(this);
+        LinearLayout.LayoutParams dotLp = new LinearLayout.LayoutParams(ui.dp(20), ui.dp(20));
+        dotLp.rightMargin = ui.dp(10);
+        animCard.addView(animSwatchDot, dotLp);
+
+        LinearLayout animTxt = new LinearLayout(this);
+        animTxt.setOrientation(LinearLayout.VERTICAL);
+        animTxt.addView(ui.text("Tuỳ chỉnh Animation kéo mép →", 13, ui.cText, true));
+        animSubLine = ui.text("", 11, ui.cMuted, false);
+        animTxt.addView(animSubLine);
+        animCard.addView(animTxt, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+        openAnimBtn = ui.compactButton("Mở", ui.cCard, ui.cPrimary, ui.cBorder);
+        openAnimBtn.setOnClickListener(this);
+        animCard.addView(openAnimBtn);
+        animCard.setOnClickListener(this);
+        body.addView(animCard);
+
+        body.addView(ui.vSpace(8));
+        LinearLayout rDbg = ui.optionRow("Hiện màu dải cảm ứng (Debug)",
                 "Tô đỏ / xanh lá / xanh dương cố định để canh mép");
         debugSw = new Switch(this);
-        boolean dbg = prefs.getBoolean("debug", OverlayService.DEF_DEBUG);
-        debugSw.setChecked(dbg);
+        debugSw.setChecked(prefs.getBoolean("debug", OverlayService.DEF_DEBUG));
         debugSw.setOnCheckedChangeListener(new VisualSwitchListener(this));
         rDbg.addView(debugSw);
         body.addView(rDbg);
-        updateVisualBadge();
 
-        body.addView(vSpace(10));
+        LinearLayout foot = new LinearLayout(this);
+        foot.setGravity(Gravity.END);
+        foot.setPadding(0, ui.dp(6), 0, 0);
+        applyVisualBtn = ui.compactButton("Áp dụng mục này", ui.cSub, ui.cPrimary, ui.cPrimary);
+        applyVisualBtn.setOnClickListener(this);
+        foot.addView(applyVisualBtn);
+        body.addView(foot);
+
+        body.addView(ui.vSpace(10));
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
-        box.setBackground(roundRect(cSub, cBorder, 10));
-        box.setPadding(dp(12), dp(10), dp(12), dp(10));
+        box.setBackground(ui.roundRect(ui.cSub, ui.cBorder, 10));
+        box.setPadding(ui.dp(12), ui.dp(10), ui.dp(12), ui.dp(10));
         box.addView(gestureLine("Vuốt mép trái / phải (nhanh)", "Back"));
-        box.addView(gestureLine("Vuốt mép trái / phải rồi giữ", "Mở hành động phụ"));
+        box.addView(gestureLine("Vuốt mép trái / phải rồi giữ", "Hành động phụ"));
         box.addView(gestureLine("Vuốt lên từ mép dưới (nhanh)", "Home"));
         box.addView(gestureLine("Vuốt lên giữ (rung nhẹ)", "Recents"));
         box.addView(gestureLine("Vuốt ngang ở mép dưới", "App trước"));
         body.addView(box);
     }
 
+    private void buildBackupSection(LinearLayout root) {
+        TextView[] badgeOut = new TextView[1];
+        UiKit.ChevronView[] chevOut = new UiKit.ChevronView[1];
+        LinearLayout body = makeCollapsibleSection(root, "Sao lưu & Khôi phục",
+                "Export / Import JSON theo từng phần cấu hình", badgeOut, chevOut, false);
+        badgeOut[0].setText("JSON");
+
+        body.addView(ui.text("Chọn các phần muốn sao lưu hoặc khôi phục:", 12, ui.cMuted, false));
+        body.addView(ui.vSpace(4));
+
+        bkGeomCb = makeCheck("Kích thước & Vùng mép", true);
+        bkHoldCb = makeCheck("Cử chỉ & Nhấn giữ", true);
+        bkAnimCb = makeCheck("Hiệu ứng Animation & Debug", true);
+        body.addView(bkGeomCb);
+        body.addView(bkHoldCb);
+        body.addView(bkAnimCb);
+        body.addView(ui.vSpace(8));
+
+        LinearLayout r1 = new LinearLayout(this);
+        r1.setOrientation(LinearLayout.HORIZONTAL);
+        exportFileBtn = ui.compactButton("Xuất file (.json)", ui.cSub, ui.cText, ui.cBorder);
+        exportFileBtn.setOnClickListener(this);
+        LinearLayout.LayoutParams l1 = new LinearLayout.LayoutParams(0, ui.dp(36), 1f);
+        l1.rightMargin = ui.dp(8);
+        r1.addView(exportFileBtn, l1);
+
+        importFileBtn = ui.compactButton("Nhập file (.json)", ui.cSub, ui.cText, ui.cBorder);
+        importFileBtn.setOnClickListener(this);
+        r1.addView(importFileBtn, new LinearLayout.LayoutParams(0, ui.dp(36), 1f));
+        body.addView(r1);
+        body.addView(ui.vSpace(6));
+
+        LinearLayout r2 = new LinearLayout(this);
+        r2.setOrientation(LinearLayout.HORIZONTAL);
+        copyJsonBtn = ui.compactButton("Copy JSON", ui.cSub, ui.cPrimary, ui.cBorder);
+        copyJsonBtn.setOnClickListener(this);
+        LinearLayout.LayoutParams l2 = new LinearLayout.LayoutParams(0, ui.dp(36), 1f);
+        l2.rightMargin = ui.dp(8);
+        r2.addView(copyJsonBtn, l2);
+
+        pasteJsonBtn = ui.compactButton("Dán JSON...", ui.cSub, ui.cPrimary, ui.cBorder);
+        pasteJsonBtn.setOnClickListener(this);
+        r2.addView(pasteJsonBtn, new LinearLayout.LayoutParams(0, ui.dp(36), 1f));
+        body.addView(r2);
+
+        TextView note = ui.text("Dự kiến TODO: đồng bộ sao lưu lên tài khoản Google cá nhân (Drive AppData) khi được cấp quyền.", 11, ui.cMuted, false);
+        note.setPadding(0, ui.dp(8), 0, 0);
+        body.addView(note);
+    }
+
     private void buildDiagnosticsSection(LinearLayout root) {
         TextView[] badgeOut = new TextView[1];
-        ChevronView[] chevOut = new ChevronView[1];
+        UiKit.ChevronView[] chevOut = new UiKit.ChevronView[1];
         LinearLayout body = makeCollapsibleSection(root, "Chẩn đoán & Lệnh ADB",
                 "Chạy không cần Shizuku, copy lệnh nhanh & khẩn cấp", badgeOut, chevOut, false);
         badgeOut[0].setText("ADB");
 
-        TextView p1 = text("• Trong app ngân hàng ẩn overlay, chế độ --hybrid tự chuyển sang đọc /dev/input.\n• Nếu máy chưa bật Shizuku, cắm USB hoặc ADB Wi-Fi và chạy lệnh bên dưới:", 12, cMuted, false);
-        p1.setPadding(0, dp(2), 0, dp(10));
+        TextView p1 = ui.text("• Trong app ngân hàng ẩn overlay, chế độ --hybrid tự chuyển sang đọc /dev/input.\n• Nếu máy chưa bật Shizuku, cắm USB hoặc ADB Wi-Fi và chạy lệnh bên dưới:", 12, ui.cMuted, false);
+        p1.setPadding(0, ui.dp(2), 0, ui.dp(10));
         body.addView(p1);
 
         body.addView(adbCommandCard("1. Bật Helper không cần Shizuku (chạy sau khi reboot):", CMD_ADB_START));
-        body.addView(vSpace(8));
+        body.addView(ui.vSpace(8));
         body.addView(adbCommandCard("2. Cấp toàn bộ quyền APK qua ADB (1 lần):", CMD_ADB_GRANT));
-        body.addView(vSpace(8));
+        body.addView(ui.vSpace(8));
         body.addView(adbCommandCard("3. Khẩn cấp hiện lại thanh 3 nút:", CMD_ADB_FSG0));
     }
 
     // ---- Builders ----
 
-    private LinearLayout makeCard() {
-        LinearLayout card = new LinearLayout(this);
-        card.setOrientation(LinearLayout.VERTICAL);
-        card.setBackground(roundRect(cCard, cBorder, 16));
-        int p = dp(16);
-        card.setPadding(p, p, p, p);
-        return card;
+    private CheckBox makeCheck(String title, boolean checked) {
+        CheckBox cb = new CheckBox(this);
+        cb.setText(title);
+        cb.setTextSize(12);
+        cb.setTextColor(ui.cText);
+        cb.setChecked(checked);
+        return cb;
     }
 
     private LinearLayout makeCollapsibleSection(LinearLayout root, String titleStr, String subStr,
-            TextView[] badgeOut, ChevronView[] chevOut, boolean expanded) {
+            TextView[] badgeOut, UiKit.ChevronView[] chevOut, boolean expanded) {
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
-        card.setBackground(roundRect(cCard, cBorder, 16));
+        card.setBackground(ui.roundRect(ui.cCard, ui.cBorder, 16));
 
         LinearLayout header = new LinearLayout(this);
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        header.setPadding(dp(16), dp(13), dp(16), dp(13));
+        header.setPadding(ui.dp(14), ui.dp(12), ui.dp(14), ui.dp(12));
 
         LinearLayout left = new LinearLayout(this);
         left.setOrientation(LinearLayout.VERTICAL);
-        left.addView(text(titleStr, 15, cText, true));
-        TextView sub = text(subStr, 12, cMuted, false);
-        sub.setPadding(0, dp(1), 0, 0);
+        left.addView(ui.text(titleStr, 15, ui.cText, true));
+        TextView sub = ui.text(subStr, 11, ui.cMuted, false);
+        sub.setPadding(0, ui.dp(1), 0, 0);
         left.addView(sub);
         header.addView(left, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
 
-        TextView badge = pill("", cMuted, cSub);
+        TextView badge = ui.pill("", ui.cMuted, ui.cSub);
         badge.setTypeface(Typeface.MONOSPACE);
         header.addView(badge);
         badgeOut[0] = badge;
 
-        ChevronView chev = new ChevronView(this, cMuted, dp(18), dp(2));
+        UiKit.ChevronView chev = new UiKit.ChevronView(this, ui.cMuted, ui.dp(18), ui.dp(2));
         chev.setExpanded(expanded, false);
-        LinearLayout.LayoutParams chevLp = new LinearLayout.LayoutParams(dp(18), dp(18));
-        chevLp.leftMargin = dp(10);
+        LinearLayout.LayoutParams chevLp = new LinearLayout.LayoutParams(ui.dp(18), ui.dp(18));
+        chevLp.leftMargin = ui.dp(10);
         header.addView(chev, chevLp);
         chevOut[0] = chev;
 
         LinearLayout body = new LinearLayout(this);
         body.setOrientation(LinearLayout.VERTICAL);
-        body.setPadding(dp(16), dp(4), dp(16), dp(14));
+        body.setPadding(ui.dp(14), ui.dp(4), ui.dp(14), ui.dp(12));
         body.setVisibility(expanded ? View.VISIBLE : View.GONE);
 
         header.setOnClickListener(new SectionToggle(body, chev));
@@ -439,23 +530,23 @@ public final class MainActivity extends Activity implements View.OnClickListener
     private LinearLayout adbCommandCard(String label, String cmd) {
         LinearLayout wrap = new LinearLayout(this);
         wrap.setOrientation(LinearLayout.VERTICAL);
-        wrap.setBackground(roundRect(cSub, cBorder, 10));
-        wrap.setPadding(dp(10), dp(8), dp(10), dp(8));
+        wrap.setBackground(ui.roundRect(ui.cSub, ui.cBorder, 10));
+        wrap.setPadding(ui.dp(10), ui.dp(8), ui.dp(10), ui.dp(8));
 
         LinearLayout top = new LinearLayout(this);
         top.setOrientation(LinearLayout.HORIZONTAL);
         top.setGravity(Gravity.CENTER_VERTICAL);
-        top.addView(text(label, 11, cMuted, true),
+        top.addView(ui.text(label, 11, ui.cMuted, true),
                 new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
 
-        Button copy = compactButton("Copy", cCard, cPrimary, cBorder);
+        Button copy = ui.compactButton("Copy", ui.cCard, ui.cPrimary, ui.cBorder);
         copy.setOnClickListener(new CopyAction(this, cmd));
         top.addView(copy);
         wrap.addView(top);
 
-        TextView code = text(cmd, 11, cText, false);
+        TextView code = ui.text(cmd, 11, ui.cText, false);
         code.setTypeface(Typeface.MONOSPACE);
-        code.setPadding(0, dp(6), 0, 0);
+        code.setPadding(0, ui.dp(6), 0, 0);
         wrap.addView(code);
         return wrap;
     }
@@ -463,11 +554,11 @@ public final class MainActivity extends Activity implements View.OnClickListener
     private LinearLayout statusCell(String label, TextView[] valOut) {
         LinearLayout cell = new LinearLayout(this);
         cell.setOrientation(LinearLayout.VERTICAL);
-        cell.setBackground(roundRect(cSub, cBorder, 12));
-        cell.setPadding(dp(12), dp(9), dp(12), dp(9));
-        cell.addView(text(label, 11, cMuted, false));
-        TextView v = text("...", 13, cText, true);
-        v.setPadding(0, dp(2), 0, 0);
+        cell.setBackground(ui.roundRect(ui.cSub, ui.cBorder, 12));
+        cell.setPadding(ui.dp(12), ui.dp(8), ui.dp(12), ui.dp(8));
+        cell.addView(ui.text(label, 11, ui.cMuted, false));
+        TextView v = ui.text("...", 13, ui.cText, true);
+        v.setPadding(0, ui.dp(2), 0, 0);
         cell.addView(v);
         valOut[0] = v;
         return cell;
@@ -475,55 +566,38 @@ public final class MainActivity extends Activity implements View.OnClickListener
 
     private LinearLayout.LayoutParams rowCellLp(boolean left) {
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-        if (left) lp.rightMargin = dp(8);
+        if (left) lp.rightMargin = ui.dp(8);
         return lp;
-    }
-
-    private LinearLayout optionRow(String titleStr, String subStr) {
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(0, dp(6), 0, dp(6));
-
-        LinearLayout left = new LinearLayout(this);
-        left.setOrientation(LinearLayout.VERTICAL);
-        left.setPadding(0, 0, dp(10), 0);
-        left.addView(text(titleStr, 13, cText, true));
-        TextView sub = text(subStr, 11, cMuted, false);
-        sub.setPadding(0, dp(1), 0, 0);
-        left.addView(sub);
-        row.addView(left, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-        return row;
     }
 
     private LinearLayout stepperRow(String titleStr, String subStr, int val,
             int min, int max, int step, EditText[] outEt) {
-        LinearLayout row = optionRow(titleStr, subStr);
+        LinearLayout row = ui.optionRow(titleStr, subStr);
 
         EditText et = new EditText(this);
         et.setInputType(InputType.TYPE_CLASS_NUMBER);
         et.setText(String.valueOf(val));
         et.setTextSize(13);
         et.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
-        et.setTextColor(cText);
+        et.setTextColor(ui.cText);
         et.setGravity(Gravity.CENTER);
-        et.setBackground(roundRect(cSub, cBorder, 8));
-        et.setPadding(dp(4), dp(4), dp(4), dp(4));
+        et.setBackground(ui.roundRect(ui.cSub, ui.cBorder, 8));
+        et.setPadding(ui.dp(4), ui.dp(4), ui.dp(4), ui.dp(4));
 
-        Button minus = stepButton("−");
+        Button minus = ui.stepButton("−");
         minus.setOnClickListener(new StepAction(et, -step, min, max));
-        Button plus = stepButton("+");
+        Button plus = ui.stepButton("+");
         plus.setOnClickListener(new StepAction(et, step, min, max));
 
         LinearLayout ctrl = new LinearLayout(this);
         ctrl.setOrientation(LinearLayout.HORIZONTAL);
         ctrl.setGravity(Gravity.CENTER_VERTICAL);
-        ctrl.addView(minus, new LinearLayout.LayoutParams(dp(32), dp(32)));
-        LinearLayout.LayoutParams etLp = new LinearLayout.LayoutParams(dp(52), dp(32));
-        etLp.leftMargin = dp(4);
-        etLp.rightMargin = dp(4);
+        ctrl.addView(minus, new LinearLayout.LayoutParams(ui.dp(32), ui.dp(32)));
+        LinearLayout.LayoutParams etLp = new LinearLayout.LayoutParams(ui.dp(52), ui.dp(32));
+        etLp.leftMargin = ui.dp(4);
+        etLp.rightMargin = ui.dp(4);
         ctrl.addView(et, etLp);
-        ctrl.addView(plus, new LinearLayout.LayoutParams(dp(32), dp(32)));
+        ctrl.addView(plus, new LinearLayout.LayoutParams(ui.dp(32), ui.dp(32)));
 
         row.addView(ctrl);
         outEt[0] = et;
@@ -533,106 +607,70 @@ public final class MainActivity extends Activity implements View.OnClickListener
     private LinearLayout gestureLine(String gesture, String action) {
         LinearLayout r = new LinearLayout(this);
         r.setOrientation(LinearLayout.HORIZONTAL);
-        r.setPadding(0, dp(3), 0, dp(3));
-        TextView l = text(gesture, 12, cMuted, false);
-        r.addView(l, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-        TextView a = text(action, 12, cText, true);
+        r.setPadding(0, ui.dp(3), 0, ui.dp(3));
+        r.addView(ui.text(gesture, 12, ui.cMuted, false),
+                new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        TextView a = ui.text(action, 12, ui.cText, true);
         a.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
         r.addView(a);
         return r;
     }
 
-    private Button actionButton(String label, int bg, int fg, int stroke) {
-        Button b = new Button(this);
-        b.setText(label);
-        b.setAllCaps(false);
-        b.setTextSize(13);
-        b.setTypeface(Typeface.DEFAULT_BOLD);
-        b.setTextColor(fg);
-        b.setBackground(roundRect(bg, stroke, 12));
-        b.setStateListAnimator(null);
-        return b;
+    // ---- Load / Apply / Backup ----
+
+    void loadFromPrefs() {
+        SharedPreferences prefs = getSharedPreferences(OverlayService.PREFS, MODE_PRIVATE);
+        sideEt.setText(String.valueOf(prefs.getInt("side", OverlayService.DEF_SIDE)));
+        bottomEt.setText(String.valueOf(prefs.getInt("bottom", OverlayService.DEF_BOTTOM)));
+        topGuardEt.setText(String.valueOf(prefs.getInt("topGuard", OverlayService.DEF_TOP_GUARD)));
+        bottomGapEt.setText(String.valueOf(prefs.getInt("bottomGap", OverlayService.DEF_BOTTOM_GAP)));
+
+        leftHoldAction = prefs.getString("leftHold", OverlayService.DEF_LEFT_HOLD);
+        rightHoldAction = prefs.getString("rightHold", OverlayService.DEF_RIGHT_HOLD);
+        holdMsEt.setText(String.valueOf(prefs.getInt("holdMs", OverlayService.DEF_HOLD_MS)));
+        leftHoldDesc.setText(GestureActions.describe(this, leftHoldAction));
+        rightHoldDesc.setText(GestureActions.describe(this, rightHoldAction));
+
+        debugSw.setChecked(prefs.getBoolean("debug", OverlayService.DEF_DEBUG));
+        updateGeometrySummary();
+        updateHoldSummary();
+        updateVisualBadge();
     }
 
-    private Button compactButton(String label, int bg, int fg, int stroke) {
-        Button b = new Button(this);
-        b.setText(label);
-        b.setAllCaps(false);
-        b.setTextSize(12);
-        b.setTextColor(fg);
-        b.setBackground(roundRect(bg, stroke, 10));
-        b.setPadding(dp(12), dp(5), dp(12), dp(5));
-        b.setMinHeight(dp(32));
-        b.setMinimumHeight(dp(32));
-        b.setStateListAnimator(null);
-        return b;
+    private void saveSectionGeometry() {
+        getSharedPreferences(OverlayService.PREFS, MODE_PRIVATE).edit()
+                .putInt("side", parse(sideEt, OverlayService.DEF_SIDE))
+                .putInt("bottom", parse(bottomEt, OverlayService.DEF_BOTTOM))
+                .putInt("topGuard", parse(topGuardEt, OverlayService.DEF_TOP_GUARD))
+                .putInt("bottomGap", parse(bottomGapEt, OverlayService.DEF_BOTTOM_GAP))
+                .apply();
     }
 
-    private Button stepButton(String sym) {
-        Button b = new Button(this);
-        b.setText(sym);
-        b.setTextSize(15);
-        b.setTypeface(Typeface.DEFAULT_BOLD);
-        b.setTextColor(cText);
-        b.setBackground(roundRect(cSub, cBorder, 8));
-        b.setPadding(0, 0, 0, 0);
-        b.setStateListAnimator(null);
-        return b;
+    private void saveSectionHold() {
+        getSharedPreferences(OverlayService.PREFS, MODE_PRIVATE).edit()
+                .putString("leftHold", leftHoldAction)
+                .putString("rightHold", rightHoldAction)
+                .putInt("holdMs", parse(holdMsEt, OverlayService.DEF_HOLD_MS))
+                .apply();
     }
 
-    private TextView pill(String s, int fg, int bg) {
-        TextView t = new TextView(this);
-        t.setText(s);
-        t.setTextSize(11);
-        t.setTypeface(Typeface.DEFAULT_BOLD);
-        t.setTextColor(fg);
-        t.setBackground(roundRect(bg, 0, 99));
-        t.setPadding(dp(10), dp(4), dp(10), dp(4));
-        return t;
+    private void saveSectionVisual() {
+        getSharedPreferences(OverlayService.PREFS, MODE_PRIVATE).edit()
+                .putBoolean("debug", debugSw.isChecked())
+                .apply();
     }
 
-    private void setPill(TextView t, String s, int fg, int bg) {
-        t.setText(s);
-        t.setTextColor(fg);
-        t.setBackground(roundRect(bg, 0, 99));
+    private void restartServiceIfActive(String msg) {
+        if (!Settings.canDrawOverlays(this)) {
+            Toast.makeText(this, "Đã lưu (hãy cấp quyền overlay để bật dải)", Toast.LENGTH_LONG).show();
+            return;
+        }
+        startOverlayService();
+        autoHelperTried = false;
+        refresh();
+        uiHandler.postDelayed(new RefreshTask(this), 250);
+        Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
     }
-
-    private TextView text(String s, int sp, int color, boolean bold) {
-        TextView t = new TextView(this);
-        t.setText(s);
-        t.setTextSize(sp);
-        t.setTextColor(color);
-        if (bold) t.setTypeface(Typeface.DEFAULT_BOLD);
-        return t;
-    }
-
-    private View divider() {
-        View v = new View(this);
-        v.setBackgroundColor(cBorder);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, Math.max(1, dp(1)));
-        lp.topMargin = dp(4);
-        lp.bottomMargin = dp(4);
-        v.setLayoutParams(lp);
-        return v;
-    }
-
-    private View vSpace(int dpVal) {
-        View v = new View(this);
-        v.setLayoutParams(new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(dpVal)));
-        return v;
-    }
-
-    private GradientDrawable roundRect(int fill, int stroke, int radiusDp) {
-        GradientDrawable d = new GradientDrawable();
-        d.setColor(fill);
-        d.setCornerRadius(dp(radiusDp));
-        if (stroke != 0) d.setStroke(Math.max(1, dp(1)), stroke);
-        return d;
-    }
-
-    // ---- Actions & State ----
 
     @Override
     public void onClick(View v) {
@@ -644,24 +682,138 @@ public final class MainActivity extends Activity implements View.OnClickListener
         } else if (v == appInfoBtn) {
             startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
                     Uri.parse("package:" + getPackageName())));
-        } else if (v == leftHoldBtn) {
-            showHoldActionPicker(true);
-        } else if (v == rightHoldBtn) {
-            showHoldActionPicker(false);
-        } else if (v == applyBtn) {
-            applyAndStart();
-        } else if (v == stopBtn) {
+        } else if (v == svcOnBtn) {
+            if (!Settings.canDrawOverlays(this)) {
+                Toast.makeText(this, "Hãy cấp quyền overlay trước", Toast.LENGTH_LONG).show();
+                return;
+            }
+            startOverlayService();
+            autoHelperTried = false;
+            refresh();
+            uiHandler.postDelayed(new RefreshTask(this), 250);
+            Toast.makeText(this, "Đã bật overlay", Toast.LENGTH_SHORT).show();
+        } else if (v == svcOffBtn) {
             stopService(new Intent(this, OverlayService.class));
             OverlayService.running = false;
             refresh();
             Toast.makeText(this, "Đã tắt overlay", Toast.LENGTH_SHORT).show();
-        } else if (v == resetBtn) {
+        } else if (v == leftHoldBtn) {
+            showHoldActionPicker(true);
+        } else if (v == rightHoldBtn) {
+            showHoldActionPicker(false);
+        } else if (v == resetGeomBtn) {
             sideEt.setText(String.valueOf(OverlayService.DEF_SIDE));
             bottomEt.setText(String.valueOf(OverlayService.DEF_BOTTOM));
             topGuardEt.setText(String.valueOf(OverlayService.DEF_TOP_GUARD));
             bottomGapEt.setText(String.valueOf(OverlayService.DEF_BOTTOM_GAP));
             updateGeometrySummary();
-            Toast.makeText(this, "Đã đặt lại mặc định — bấm BẬT / Áp dụng để lưu", Toast.LENGTH_SHORT).show();
+        } else if (v == applyGeomBtn) {
+            saveSectionGeometry();
+            restartServiceIfActive("Đã áp dụng Kích thước & Vùng mép");
+        } else if (v == applyHoldBtn) {
+            saveSectionHold();
+            restartServiceIfActive("Đã áp dụng Cử chỉ & Nhấn giữ");
+        } else if (v == applyVisualBtn) {
+            saveSectionVisual();
+            restartServiceIfActive("Đã áp dụng Hiển thị & Hiệu ứng");
+        } else if (v == openAnimBtn || v == openAnimBtn.getParent()) {
+            startActivityForResult(new Intent(this, AnimConfigActivity.class), REQ_ANIM);
+        } else if (v == bottomCancelBtn) {
+            loadFromPrefs();
+            Toast.makeText(this, "Đã hủy thay đổi chưa áp dụng", Toast.LENGTH_SHORT).show();
+        } else if (v == bottomApplyBtn) {
+            saveSectionGeometry();
+            saveSectionHold();
+            saveSectionVisual();
+            restartServiceIfActive("Đã áp dụng toàn bộ cấu hình");
+        } else if (v == exportFileBtn) {
+            if (!anyBackupSelected()) return;
+            Intent i = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+            i.addCategory(Intent.CATEGORY_OPENABLE);
+            i.setType("application/json");
+            i.putExtra(Intent.EXTRA_TITLE, "edgegest-backup.json");
+            startActivityForResult(i, REQ_BACKUP_FILE);
+        } else if (v == importFileBtn) {
+            if (!anyBackupSelected()) return;
+            Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            i.addCategory(Intent.CATEGORY_OPENABLE);
+            i.setType("*/*");
+            startActivityForResult(i, REQ_RESTORE_FILE);
+        } else if (v == copyJsonBtn) {
+            if (!anyBackupSelected()) return;
+            String json = ConfigBackup.exportJson(getSharedPreferences(OverlayService.PREFS, MODE_PRIVATE),
+                    bkGeomCb.isChecked(), bkHoldCb.isChecked(), bkAnimCb.isChecked());
+            ClipboardManager cm = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+            if (cm != null) {
+                cm.setPrimaryClip(ClipData.newPlainText("EdgeGest Config", json));
+                Toast.makeText(this, "Đã copy JSON backup", Toast.LENGTH_SHORT).show();
+            }
+        } else if (v == pasteJsonBtn) {
+            if (!anyBackupSelected()) return;
+            showPasteJsonDialog();
+        }
+    }
+
+    private boolean anyBackupSelected() {
+        if (bkGeomCb.isChecked() || bkHoldCb.isChecked() || bkAnimCb.isChecked()) return true;
+        Toast.makeText(this, "Hãy chọn ít nhất 1 phần cấu hình", Toast.LENGTH_SHORT).show();
+        return false;
+    }
+
+    private void showPasteJsonDialog() {
+        EditText et = new EditText(this);
+        et.setHint("Dán nội dung JSON vào đây...");
+        et.setMinLines(4);
+        et.setMaxLines(8);
+        new AlertDialog.Builder(this)
+                .setTitle("Khôi phục từ JSON")
+                .setView(et)
+                .setPositiveButton("Khôi phục", new PasteJsonListener(this, et))
+                .setNegativeButton("Hủy", null)
+                .show();
+    }
+
+    void applyJsonString(String raw) {
+        try {
+            String msg = ConfigBackup.importJson(getSharedPreferences(OverlayService.PREFS, MODE_PRIVATE),
+                    raw, bkGeomCb.isChecked(), bkHoldCb.isChecked(), bkAnimCb.isChecked());
+            loadFromPrefs();
+            if (OverlayService.running && Settings.canDrawOverlays(this)) startOverlayService();
+            Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
+        } catch (Throwable t) {
+            Toast.makeText(this, "JSON không hợp lệ: " + t.getMessage(), Toast.LENGTH_LONG).show();
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQ_ANIM && resultCode == RESULT_OK) {
+            loadFromPrefs();
+            return;
+        }
+        if (resultCode != RESULT_OK || data == null || data.getData() == null) return;
+        Uri uri = data.getData();
+        if (requestCode == REQ_BACKUP_FILE) {
+            try (OutputStream os = getContentResolver().openOutputStream(uri)) {
+                String json = ConfigBackup.exportJson(getSharedPreferences(OverlayService.PREFS, MODE_PRIVATE),
+                        bkGeomCb.isChecked(), bkHoldCb.isChecked(), bkAnimCb.isChecked());
+                if (os != null) os.write(json.getBytes("UTF-8"));
+                Toast.makeText(this, "Đã xuất file backup JSON", Toast.LENGTH_SHORT).show();
+            } catch (Throwable t) {
+                Toast.makeText(this, "Xuất file lỗi: " + t.getMessage(), Toast.LENGTH_LONG).show();
+            }
+        } else if (requestCode == REQ_RESTORE_FILE) {
+            try (InputStream is = getContentResolver().openInputStream(uri)) {
+                if (is == null) return;
+                BufferedReader br = new BufferedReader(new InputStreamReader(is, "UTF-8"));
+                StringBuilder sb = new StringBuilder();
+                String line;
+                while ((line = br.readLine()) != null) sb.append(line).append('\n');
+                applyJsonString(sb.toString());
+            } catch (Throwable t) {
+                Toast.makeText(this, "Đọc file lỗi: " + t.getMessage(), Toast.LENGTH_LONG).show();
+            }
         }
     }
 
@@ -711,7 +863,7 @@ public final class MainActivity extends Activity implements View.OnClickListener
         new AlertDialog.Builder(this)
                 .setTitle(isLeft ? "Chọn app cho mép trái" : "Chọn app cho mép phải")
                 .setItems(labels, new AppPickListener(this, isLeft, pkgs))
-                .setNegativeButton("Huỷ", null)
+                .setNegativeButton("Hủy", null)
                 .show();
     }
 
@@ -732,30 +884,6 @@ public final class MainActivity extends Activity implements View.OnClickListener
         }
     }
 
-    private void applyAndStart() {
-        if (!Settings.canDrawOverlays(this)) {
-            Toast.makeText(this, "Hãy cấp quyền overlay trước", Toast.LENGTH_LONG).show();
-            return;
-        }
-        SharedPreferences.Editor e = getSharedPreferences(OverlayService.PREFS, MODE_PRIVATE).edit();
-        e.putInt("side", parse(sideEt, OverlayService.DEF_SIDE));
-        e.putInt("bottom", parse(bottomEt, OverlayService.DEF_BOTTOM));
-        e.putInt("topGuard", parse(topGuardEt, OverlayService.DEF_TOP_GUARD));
-        e.putInt("bottomGap", parse(bottomGapEt, OverlayService.DEF_BOTTOM_GAP));
-        e.putInt("holdMs", parse(holdMsEt, OverlayService.DEF_HOLD_MS));
-        e.putBoolean("anim", animSw.isChecked());
-        e.putBoolean("debug", debugSw.isChecked());
-        e.putString("leftHold", leftHoldAction);
-        e.putString("rightHold", rightHoldAction);
-        e.apply();
-
-        startOverlayService();
-        autoHelperTried = false;
-        refresh();
-        uiHandler.postDelayed(new RefreshTask(this), 250);
-        Toast.makeText(this, "Đã áp dụng cấu hình", Toast.LENGTH_SHORT).show();
-    }
-
     private void startOverlayService() {
         Intent svc = new Intent(this, OverlayService.class);
         if (Build.VERSION.SDK_INT >= 26) startForegroundService(svc);
@@ -767,18 +895,18 @@ public final class MainActivity extends Activity implements View.OnClickListener
         boolean svc = OverlayService.running;
 
         ovVal.setText(ov ? "ĐÃ CẤP ✓" : "CHƯA CẤP ✗");
-        ovVal.setTextColor(ov ? cOkFg : cErrFg);
+        ovVal.setTextColor(ov ? ui.cOkFg : ui.cErrFg);
 
         svcVal.setText(svc ? "ĐANG CHẠY ✓" : "ĐÃ TẮT ✗");
-        svcVal.setTextColor(svc ? cOkFg : cWarnFg);
+        svcVal.setTextColor(svc ? ui.cOkFg : ui.cWarnFg);
 
         ovActionLabel.setVisibility(ov ? View.VISIBLE : View.GONE);
         grantBtn.setVisibility(ov ? View.GONE : View.VISIBLE);
 
         helperVal.setText("Kiểm tra...");
-        helperVal.setTextColor(cMuted);
+        helperVal.setTextColor(ui.cMuted);
         shzVal.setText("Kiểm tra...");
-        shzVal.setTextColor(cMuted);
+        shzVal.setTextColor(ui.cMuted);
         new Thread(new HelperProbe(this), "helper-probe").start();
     }
 
@@ -789,24 +917,24 @@ public final class MainActivity extends Activity implements View.OnClickListener
         boolean svc = OverlayService.running;
 
         helperVal.setText(alive ? "SỐNG ✓" : "CHƯA CHẠY ✗");
-        helperVal.setTextColor(alive ? cOkFg : cErrFg);
+        helperVal.setTextColor(alive ? ui.cOkFg : ui.cErrFg);
 
         shizukuBtn.setEnabled(true);
         if (shzState == ShizukuStarter.STATE_NOT_RUNNING) {
             shzVal.setText("CHƯA BẬT ✗");
-            shzVal.setTextColor(cWarnFg);
+            shzVal.setTextColor(ui.cWarnFg);
             helperDesc.setText("Mở Shizuku hoặc chạy lệnh ADB bên dưới");
             shizukuBtn.setText("Mở Shizuku");
             shizukuBtn.setVisibility(alive ? View.GONE : View.VISIBLE);
         } else if (shzState == ShizukuStarter.STATE_NO_PERMISSION) {
             shzVal.setText("CHƯA CẤP");
-            shzVal.setTextColor(cWarnFg);
+            shzVal.setTextColor(ui.cWarnFg);
             helperDesc.setText("Cần cấp quyền Shizuku cho EdgeGest");
             shizukuBtn.setText("Cấp quyền Shizuku");
             shizukuBtn.setVisibility(View.VISIBLE);
         } else {
             shzVal.setText("SẴN SÀNG ✓");
-            shzVal.setTextColor(cOkFg);
+            shzVal.setTextColor(ui.cOkFg);
             helperDesc.setText("Khởi chạy qua Shizuku uid 2000");
             shizukuBtn.setText(alive ? "Khởi động lại" : "Bật Helper");
             shizukuBtn.setVisibility(View.VISIBLE);
@@ -818,16 +946,16 @@ public final class MainActivity extends Activity implements View.OnClickListener
 
         boolean allReady = ov && svc && alive;
         if (allReady) {
-            setPill(overallBadge, "Đang hoạt động", cOkFg, cOkBg);
-            setPill(permSummary, "4/4 OK", cOkFg, cOkBg);
+            ui.setPill(overallBadge, "Đang hoạt động", ui.cOkFg, ui.cOkBg);
+            ui.setPill(permSummary, "4/4 OK", ui.cOkFg, ui.cOkBg);
             if (!autoPermCollapsedOnce) {
                 autoPermCollapsedOnce = true;
                 permBody.setVisibility(View.GONE);
                 permChevron.setExpanded(false, false);
             }
         } else {
-            setPill(overallBadge, svc ? "Thiếu Helper/Quyền" : "Đã tắt", cWarnFg, cWarnBg);
-            setPill(permSummary, "Cần kiểm tra", cWarnFg, cWarnBg);
+            ui.setPill(overallBadge, svc ? "Thiếu Helper/Quyền" : "Đã tắt", ui.cWarnFg, ui.cWarnBg);
+            ui.setPill(permSummary, "Cần kiểm tra", ui.cWarnFg, ui.cWarnBg);
             permBody.setVisibility(View.VISIBLE);
             permChevron.setExpanded(true, false);
         }
@@ -845,24 +973,44 @@ public final class MainActivity extends Activity implements View.OnClickListener
         boolean l = GestureActions.isEnabled(leftHoldAction);
         boolean r = GestureActions.isEnabled(rightHoldAction);
         if (!l && !r) {
-            setPill(holdSummary, "Chỉ Back", cMuted, cSub);
+            ui.setPill(holdSummary, "Chỉ Back", ui.cMuted, ui.cSub);
         } else {
             String lb = l ? GestureActions.shortBadge(leftHoldAction) : "—";
             String rb = r ? GestureActions.shortBadge(rightHoldAction) : "—";
-            setPill(holdSummary, "L:" + lb + " R:" + rb, cPrimary, cSub);
+            ui.setPill(holdSummary, "L:" + lb + " R:" + rb, ui.cPrimary, ui.cSub);
         }
     }
 
     void updateVisualBadge() {
-        boolean a = animSw.isChecked();
+        SharedPreferences prefs = getSharedPreferences(OverlayService.PREFS, MODE_PRIVATE);
+        boolean al = prefs.getBoolean("animLeft", OverlayService.DEF_ANIM_LEFT);
+        boolean ar = prefs.getBoolean("animRight", OverlayService.DEF_ANIM_RIGHT);
+        boolean ab = prefs.getBoolean("animBottom", OverlayService.DEF_ANIM_BOTTOM);
+        int col = prefs.getInt("animColor", OverlayService.DEF_ANIM_COLOR);
+        int aw = prefs.getInt("animWidth", OverlayService.DEF_ANIM_WIDTH);
+        int len = prefs.getInt("animLength", OverlayService.DEF_ANIM_LENGTH);
+        int alpha = prefs.getInt("animAlpha", OverlayService.DEF_ANIM_ALPHA);
         boolean d = debugSw.isChecked();
-        if (d) {
-            setPill(visualSummary, (a ? "Anim · " : "") + "Debug BẬT", cWarnFg, cWarnBg);
-        } else if (a) {
-            setPill(visualSummary, "Anim: BẬT", cOkFg, cOkBg);
-        } else {
-            setPill(visualSummary, "Tắt hết", cMuted, cSub);
-        }
+
+        animSwatchDot.setBackground(ui.roundRect(col, ui.cBorder, 99));
+        animSwatchDot.setAlpha(Math.max(0.2f, alpha / 100f));
+
+        StringBuilder edges = new StringBuilder();
+        if (al) edges.append("Trái, ");
+        if (ar) edges.append("Phải, ");
+        if (ab) edges.append("Dưới, ");
+        String eText = edges.length() > 0 ? edges.substring(0, edges.length() - 2) : "Tắt hết";
+        animSubLine.setText(eText + " · Rộng " + aw + "dp · Dài " + len + "dp · " + alpha + "%");
+
+        StringBuilder shortE = new StringBuilder();
+        if (al) shortE.append("L·");
+        if (ar) shortE.append("R·");
+        if (ab) shortE.append("B·");
+        String se = shortE.length() > 0 ? shortE.substring(0, shortE.length() - 1) : "TẮT";
+
+        if (d) ui.setPill(visualSummary, se + " · Dbg", ui.cWarnFg, ui.cWarnBg);
+        else if (al || ar || ab) ui.setPill(visualSummary, se, ui.cOkFg, ui.cOkBg);
+        else ui.setPill(visualSummary, "Tắt hết", ui.cMuted, ui.cSub);
     }
 
     private int parse(EditText et, int def) {
@@ -870,69 +1018,13 @@ public final class MainActivity extends Activity implements View.OnClickListener
         catch (Exception e) { return def; }
     }
 
-    private int dp(int v) {
-        return Math.round(v * getResources().getDisplayMetrics().density);
-    }
-
     // ---- Static nested classes (d8 34.0.0 compatibility) ----
-
-    /** Vẽ icon mũi tên chevron nét stroke tròn đầu giống design (xoay mượt 0° mở ↔ -90° đóng). */
-    private static final class ChevronView extends View {
-        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Path path = new Path();
-        private final int size;
-
-        ChevronView(Context ctx, int color, int sizePx, int strokePx) {
-            super(ctx);
-            this.size = sizePx;
-            paint.setColor(color);
-            paint.setStyle(Paint.Style.STROKE);
-            paint.setStrokeCap(Paint.Cap.ROUND);
-            paint.setStrokeJoin(Paint.Join.ROUND);
-            paint.setStrokeWidth(Math.max(2f, strokePx));
-        }
-
-        void setExpanded(boolean expanded, boolean animate) {
-            float target = expanded ? 0f : -90f;
-            if (animate) animate().rotation(target).setDuration(180).start();
-            else setRotation(target);
-        }
-
-        @Override
-        protected void onMeasure(int wSpec, int hSpec) {
-            setMeasuredDimension(size, size);
-        }
-
-        @Override
-        protected void onDraw(Canvas canvas) {
-            super.onDraw(canvas);
-            float w = getWidth(), h = getHeight();
-            path.reset();
-            path.moveTo(w * 0.25f, h * 0.375f);
-            path.lineTo(w * 0.50f, h * 0.625f);
-            path.lineTo(w * 0.75f, h * 0.375f);
-            canvas.drawPath(path, paint);
-        }
-    }
-
-    private static final class InsetPadding implements View.OnApplyWindowInsetsListener {
-        InsetPadding() {}
-
-        @Override
-        public WindowInsets onApplyWindowInsets(View v, WindowInsets insets) {
-            v.setPadding(insets.getSystemWindowInsetLeft(),
-                    insets.getSystemWindowInsetTop(),
-                    insets.getSystemWindowInsetRight(),
-                    insets.getSystemWindowInsetBottom());
-            return insets;
-        }
-    }
 
     private static final class SectionToggle implements View.OnClickListener {
         private final LinearLayout body;
-        private final ChevronView chevron;
+        private final UiKit.ChevronView chevron;
 
-        SectionToggle(LinearLayout body, ChevronView chevron) {
+        SectionToggle(LinearLayout body, UiKit.ChevronView chevron) {
             this.body = body;
             this.chevron = chevron;
         }
@@ -982,6 +1074,21 @@ public final class MainActivity extends Activity implements View.OnClickListener
                 cm.setPrimaryClip(ClipData.newPlainText("EdgeGest ADB", cmd));
                 Toast.makeText(ctx, "Đã copy lệnh vào bộ nhớ đệm", Toast.LENGTH_SHORT).show();
             }
+        }
+    }
+
+    private static final class PasteJsonListener implements DialogInterface.OnClickListener {
+        private final MainActivity activity;
+        private final EditText et;
+
+        PasteJsonListener(MainActivity activity, EditText et) {
+            this.activity = activity;
+            this.et = et;
+        }
+
+        @Override
+        public void onClick(DialogInterface dialog, int which) {
+            activity.applyJsonString(et.getText().toString());
         }
     }
 

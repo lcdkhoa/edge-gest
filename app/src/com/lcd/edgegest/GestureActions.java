@@ -67,16 +67,16 @@ final class GestureActions {
     static String shortBadge(String action) {
         if (!isEnabled(action)) return "";
         if (action.startsWith(APP_PREFIX)) return "APP";
-        if (SWITCH.equals(action)) return "⇄";
-        if (RECENTS.equals(action)) return "▢";
-        if (HOME.equals(action)) return "⌂";
-        if (POWER.equals(action)) return "⏻";
-        if (VOLUME.equals(action)) return "🔊";
+        if (SWITCH.equals(action)) return "SW";
+        if (RECENTS.equals(action)) return "REC";
+        if (HOME.equals(action)) return "HOME";
+        if (POWER.equals(action)) return "PWR";
+        if (VOLUME.equals(action)) return "VOL";
         if (NOTIF.equals(action)) return "🔔";
-        if (QS.equals(action)) return "⚙";
-        if (SCREENSHOT.equals(action)) return "📷";
-        if (LOCK.equals(action)) return "🔒";
-        if (MEDIA.equals(action)) return "⏯";
+        if (QS.equals(action)) return "QS";
+        if (SCREENSHOT.equals(action)) return "CAP";
+        if (LOCK.equals(action)) return "LCK";
+        if (MEDIA.equals(action)) return "▶";
         return "•";
     }
 
