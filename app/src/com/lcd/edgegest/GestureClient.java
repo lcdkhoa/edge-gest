@@ -8,7 +8,7 @@ import java.net.Socket;
 import java.util.concurrent.LinkedBlockingQueue;
 
 /**
- * Gửi lệnh cử chỉ (1 ký tự) tới helper shell qua TCP localhost 127.0.0.1:47820.
+ * Gửi lệnh cử chỉ tới helper shell qua TCP localhost 127.0.0.1:47820.
  * Một luồng nền giữ kết nối, tự kết nối lại khi rớt.
  */
 final class GestureClient implements Runnable {
@@ -16,7 +16,7 @@ final class GestureClient implements Runnable {
     private static final String HOST = "127.0.0.1";
     private static final int PORT = 47820;
 
-    private final LinkedBlockingQueue<Character> queue = new LinkedBlockingQueue<>();
+    private final LinkedBlockingQueue<String> queue = new LinkedBlockingQueue<>();
     private volatile boolean running = true;
     private Socket socket;
     private OutputStream out;
@@ -28,12 +28,16 @@ final class GestureClient implements Runnable {
     }
 
     void send(char c) {
-        queue.offer(c);
+        queue.offer(String.valueOf(c));
+    }
+
+    void sendCommand(String cmd) {
+        if (cmd != null && !cmd.isEmpty()) queue.offer(cmd);
     }
 
     void stop() {
         running = false;
-        queue.offer('\0');
+        queue.offer("");
         closeQuietly();
     }
 
@@ -41,10 +45,11 @@ final class GestureClient implements Runnable {
     public void run() {
         while (running) {
             try {
-                Character c = queue.take();
+                String cmd = queue.take();
                 if (!running) break;
+                if (cmd.isEmpty()) continue;
                 ensureConnected();
-                out.write(c);
+                out.write(cmd.getBytes("UTF-8"));
                 out.write('\n');
                 out.flush();
             } catch (Throwable t) {

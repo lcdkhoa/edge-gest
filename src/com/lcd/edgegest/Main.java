@@ -141,28 +141,44 @@ public final class Main {
         public void run() {
             try (java.net.Socket sock = socket) {
                 sock.setTcpNoDelay(true);
-                java.io.InputStream in = sock.getInputStream();
-                int c;
-                while ((c = in.read()) != -1) {
-                    doCommand((char) c);
+                java.io.BufferedReader reader = new java.io.BufferedReader(
+                        new java.io.InputStreamReader(sock.getInputStream(), "UTF-8"));
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    if (!line.isEmpty()) doCommand(line.trim());
                 }
             } catch (Throwable t) {
                 Env.log("handle lỗi: " + t);
             }
         }
 
-        private static void doCommand(char c) {
+        private static void doCommand(String cmd) {
             long now = SystemClock.uptimeMillis();
+            if (cmd.startsWith("O:") && cmd.length() > 2) {
+                lastOverlayCmdMs = now;
+                String pkg = cmd.substring(2).trim();
+                Env.log("cmd LAUNCH " + pkg);
+                Env.launchApp(ctx, pkg);
+                return;
+            }
+            char c = cmd.charAt(0);
             switch (c) {
                 case 'D':
                     lastOverlayDownMs = now;
                     if (debug) Env.log("overlay touch down");
                     break;
-                case 'B': lastOverlayCmdMs = now; Env.log("cmd BACK");    Env.key(KeyEvent.KEYCODE_BACK); break;
-                case 'H': lastOverlayCmdMs = now; Env.log("cmd HOME");    Env.key(KeyEvent.KEYCODE_HOME); break;
-                case 'R': lastOverlayCmdMs = now; Env.log("cmd RECENTS"); Env.key(KeyEvent.KEYCODE_APP_SWITCH); break;
-                case 'S': lastOverlayCmdMs = now; Env.log("cmd SWITCH");  Env.switchToPrevious(ctx); break;
-                default: break; // bỏ qua \n và ký tự lạ
+                case 'B': lastOverlayCmdMs = now; Env.log("cmd BACK");         Env.key(KeyEvent.KEYCODE_BACK); break;
+                case 'H': lastOverlayCmdMs = now; Env.log("cmd HOME");         Env.key(KeyEvent.KEYCODE_HOME); break;
+                case 'R': lastOverlayCmdMs = now; Env.log("cmd RECENTS");      Env.key(KeyEvent.KEYCODE_APP_SWITCH); break;
+                case 'S': lastOverlayCmdMs = now; Env.log("cmd SWITCH");       Env.switchToPrevious(ctx); break;
+                case 'P': lastOverlayCmdMs = now; Env.log("cmd POWER");        Env.showPowerDialog(); break;
+                case 'V': lastOverlayCmdMs = now; Env.log("cmd VOLUME");       Env.showVolumePanel(ctx); break;
+                case 'N': lastOverlayCmdMs = now; Env.log("cmd NOTIF");        Env.expandNotifications(); break;
+                case 'Q': lastOverlayCmdMs = now; Env.log("cmd QS");           Env.expandQuickSettings(); break;
+                case 'C': lastOverlayCmdMs = now; Env.log("cmd SCREENSHOT");   Env.key(KeyEvent.KEYCODE_SYSRQ); break;
+                case 'L': lastOverlayCmdMs = now; Env.log("cmd LOCK");         Env.key(KeyEvent.KEYCODE_SLEEP); break;
+                case 'M': lastOverlayCmdMs = now; Env.log("cmd MEDIA");        Env.key(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE); break;
+                default: break;
             }
         }
     }

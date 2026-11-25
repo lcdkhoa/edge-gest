@@ -488,6 +488,20 @@
       notes: "Thay giao diện phẳng bằng thẻ tổng quan 2×2 (Overlay, Dải mép, Helper :47820, Shizuku) + nút chính BẬT/TẮT và 4 mục collapsible (`Quyền & Helper`, `Kích thước & Vùng mép` kèm stepper −/+ và nút đặt lại mặc định, `Hiển thị & Cử chỉ` với `Switch`, `Chẩn đoán & Khẩn cấp`). Dùng `GradientDrawable` thích ứng sáng/tối và static nested classes (`SectionToggle`, `StepAction`, `GeometryWatcher`, `DebugSwitchListener`) tương thích `d8` 34.0.0. Mở rộng `run.ps1 grant` cấp song song `SYSTEM_ALERT_WINDOW`, `moe.shizuku.manager.permission.API_V23`, `POST_NOTIFICATIONS`, và `ACCESS_LOCAL_NETWORK`.",
       tags: ["UI", "Ops"],
     },
+    {
+      id: "D-12",
+      date: "2026-11-25",
+      decision: "**Thêm nhấn giữ mép trái/phải (`leftHold`/`rightHold`), animation kéo mép (`EdgeAnimView`), nút Copy lệnh ADB và `ChevronView`**",
+      notes: "Thêm `GestureActions` + mở rộng giao thức dòng trên `GestureClient`/`Main.ClientHandler`/`Env` hỗ trợ: `none`, `switch`, `recents`, `home`, `power` (`showGlobalActions`/longpress), `volume` (`AudioManager.FLAG_SHOW_UI`), `notif`/`qs` (`cmd statusbar`), `screenshot` (`KEYCODE_SYSRQ`), `lock` (`KEYCODE_SLEEP`), `media` (`KEYCODE_MEDIA_PLAY_PAUSE`), và `app:<pkg>` (khai báo `<intent>` LAUNCHER trong `<queries>` của `AndroidManifest.xml`, picker trong `MainActivity`). Thêm `EdgeAnimView` (`FLAG_NOT_TOUCHABLE`) vẽ dải cong + biểu tượng khi kéo (bật/tắt qua `anim` switch). Bổ sung card lệnh ADB không cần Shizuku kèm nút Copy vào clipboard, và thay chevron văn bản bằng `ChevronView` vẽ vector stroke `m6 9 6 6 6-6` xoay mượt.",
+      tags: ["Overlay", "Helper", "UI"],
+    },
+    {
+      id: "D-13",
+      date: "2026-11-25",
+      decision: "**Sửa lỗi mất UI khi collapse mục Options trong `MainActivity` (`vSpace` + `ScrollView`)**",
+      notes: "Xác minh qua `uiautomator dump` trên máy `c92b13cf`: khi thu gọn mục khiến tổng chiều cao nhỏ hơn màn hình, `ScrollView.setFillViewport(true)` chuyển `MeasureSpec` từ `UNSPECIFIED` sang `AT_MOST`/`EXACTLY`; `View` trống (`vSpace`) không có `LayoutParams.height` cố định nên `View.getDefaultSize` giãn ra chiếm toàn bộ chiều cao (`2066px`), đẩy phần UI bên dưới ra khỏi màn hình. Đã đặt `LayoutParams(MATCH_PARENT, dp(dpVal))` cho `vSpace()` và bỏ `setFillViewport(true)`.",
+      tags: ["UI"],
+    },
   ];
   // <</DECISIONS>>
 
