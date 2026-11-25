@@ -1,0 +1,22 @@
+---
+description: EdgeGest architecture, build constraints and ADB runbook (canonical in AGENTS.md)
+globs:
+alwaysApply: true
+---
+
+Read **AGENTS.md** at the repo root for the full, canonical guidance (architecture, build, runbook,
+testing, open work). Key points so you don't break things:
+
+- **Two processes over TCP `127.0.0.1:47820`**: overlay **APK** (`app/`, package `com.lcd.edgegest`,
+  draws edge strips that *consume* the touch) + **helper injector** (`src/`, runs as uid `shell` via
+  `app_process`, injects Back/Home/Recents). They must stay separate: `WindowManagerService` rejects
+  overlay windows created from `app_process` with `Unknown pid uid=2000`, and a normal app cannot inject
+  global keys without Accessibility/`INJECT_EVENTS`.
+- **Java build constraint**: no lambdas, anonymous classes, method refs, or non‑static inner classes
+  anywhere — `d8` 34.0.0 crashes on their synthetic classes and `android.jar` has no `LambdaMetafactory`.
+  Use static nested classes with explicit constructors; compile `-source 8 -target 8`.
+- **Build**: `.\build.ps1 -Push` (helper dex), `.\build-apk.ps1` (APK). **Installing is blocked by MIUI** —
+  push the APK and tap‑install (`.\run.ps1 push-apk`); do not spoof the installer id.
+- **Run/tune over ADB** via `run.ps1`; strip width + debug are Intent extras tuned live (not persisted).
+  Emergency un‑stick: `.\run.ps1 fsg 0`.
+- Reply to the user in **Vietnamese** (correct diacritics).
