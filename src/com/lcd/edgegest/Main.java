@@ -15,12 +15,13 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * EdgeGest - gesture điều hướng không cần Accessibility, không cần overlay window.
+ * EdgeGest - gesture điều hướng không cần Accessibility.
  *
- * Đọc trực tiếp luồng cảm ứng từ /dev/input/eventX (uid shell thuộc nhóm input),
- * nhận diện cử chỉ ở mép màn hình rồi inject phím Back/Home/Recents.
- *
- * Chạy: CLASSPATH=.../edgegest.dex app_process /system/bin com.lcd.edgegest.Main [--debug] [--dev=/dev/input/eventN]
+ * Chế độ:
+ *  - `--server`: lắng nghe TCP 127.0.0.1:47820 nhận lệnh từ APK overlay rồi inject phím.
+ *  - `--server --hybrid`: chạy song song reader `/dev/input`; chỉ fallback khi overlay không nhận chạm
+ *    (ví dụ trong app ngân hàng bật HIDE_NON_SYSTEM_OVERLAY_WINDOWS).
+ *  - mặc định (không cờ): chỉ đọc `/dev/input/eventX` (không nuốt chạm).
  */
 public final class Main {
     private static final String MIUI_HOME = "com.miui.home";
@@ -35,6 +36,9 @@ public final class Main {
     private static final int ABS_MT_POSITION_Y = 0x36;
 
     private static boolean debug;
+    private static boolean hybrid;
+    private static volatile long lastOverlayDownMs;
+    private static volatile long lastOverlayCmdMs;
     private static final Gestures G = new Gestures();
 
     private static Context ctx;
@@ -54,6 +58,7 @@ public final class Main {
         for (String a : args) {
             if (a.equals("--debug")) debug = true;
             else if (a.equals("--server")) server = true;
+            else if (a.equals("--hybrid")) hybrid = true;
             else if (a.startsWith("--dev=")) dev = a.substring(6);
             else if (a.startsWith("--edge=")) G.edgeFrac = Float.parseFloat(a.substring(7));
         }
@@ -70,23 +75,30 @@ public final class Main {
         }
 
         if (server) {
-            // Chế độ injector: nhận lệnh cử chỉ từ APK overlay qua TCP localhost.
             Thread srv = new Thread(new CommandServer(), "edgegest-server");
             srv.setDaemon(false);
             srv.start();
-            Env.log("command server started on 127.0.0.1:" + CommandServer.PORT);
-        } else {
-            // Chế độ đọc /dev/input (không overlay): tự nhận diện cử chỉ.
-            if (dev == null) dev = findTouchDevice();
-            readMaxes(dev);
-            G.compute();
-            Env.log("start: dev=" + dev + " maxX=" + G.maxX + " maxY=" + G.maxY
-                    + " edgeX=" + G.edgeX + " bottomZone=" + G.bottomZone
-                    + " backDist=" + G.backDist + " homeDist=" + G.homeDist + " switchDist=" + G.switchDist);
-            Thread reader = new Thread(new ReaderLoop(dev), "edgegest-reader");
-            reader.setDaemon(false);
-            reader.start();
-            Env.log("reader started");
+            Env.log("command server started on 127.0.0.1:" + CommandServer.PORT
+                    + (hybrid ? " (hybrid fallback on)" : ""));
+        }
+
+        if (!server || hybrid) {
+            try {
+                if (dev == null) dev = findTouchDevice();
+                readMaxes(dev);
+                G.compute();
+                Env.log("start: dev=" + dev + " maxX=" + G.maxX + " maxY=" + G.maxY
+                        + " edgeX=" + G.edgeX + " bottomZone=" + G.bottomZone
+                        + " backDist=" + G.backDist + " homeDist=" + G.homeDist
+                        + " switchDist=" + G.switchDist + (hybrid ? " mode=hybrid" : ""));
+                Thread reader = new Thread(new ReaderLoop(dev), "edgegest-reader");
+                reader.setDaemon(false);
+                reader.start();
+                Env.log("reader started");
+            } catch (Throwable t) {
+                if (!server) throw t;
+                Env.log("hybrid reader init lỗi (tiếp tục chạy server): " + t);
+            }
         }
 
         handler.post(poll);
@@ -106,7 +118,9 @@ public final class Main {
                             java.net.InetAddress.getByName("127.0.0.1"), PORT));
                     while (true) {
                         java.net.Socket s = ss.accept();
-                        handle(s);
+                        Thread t = new Thread(new ClientHandler(s), "edgegest-client-conn");
+                        t.setDaemon(true);
+                        t.start();
                     }
                 } catch (Throwable t) {
                     Env.log("server lỗi, thử lại sau 1s: " + t);
@@ -114,9 +128,18 @@ public final class Main {
                 }
             }
         }
+    }
 
-        private void handle(java.net.Socket s) {
-            try (java.net.Socket sock = s) {
+    static final class ClientHandler implements Runnable {
+        private final java.net.Socket socket;
+
+        ClientHandler(java.net.Socket socket) {
+            this.socket = socket;
+        }
+
+        @Override
+        public void run() {
+            try (java.net.Socket sock = socket) {
                 sock.setTcpNoDelay(true);
                 java.io.InputStream in = sock.getInputStream();
                 int c;
@@ -128,12 +151,17 @@ public final class Main {
             }
         }
 
-        private void doCommand(char c) {
+        private static void doCommand(char c) {
+            long now = SystemClock.uptimeMillis();
             switch (c) {
-                case 'B': Env.log("cmd BACK");    Env.key(KeyEvent.KEYCODE_BACK); break;
-                case 'H': Env.log("cmd HOME");    Env.key(KeyEvent.KEYCODE_HOME); break;
-                case 'R': Env.log("cmd RECENTS"); Env.key(KeyEvent.KEYCODE_APP_SWITCH); break;
-                case 'S': Env.log("cmd SWITCH");  Env.switchToPrevious(ctx); break;
+                case 'D':
+                    lastOverlayDownMs = now;
+                    if (debug) Env.log("overlay touch down");
+                    break;
+                case 'B': lastOverlayCmdMs = now; Env.log("cmd BACK");    Env.key(KeyEvent.KEYCODE_BACK); break;
+                case 'H': lastOverlayCmdMs = now; Env.log("cmd HOME");    Env.key(KeyEvent.KEYCODE_HOME); break;
+                case 'R': lastOverlayCmdMs = now; Env.log("cmd RECENTS"); Env.key(KeyEvent.KEYCODE_APP_SWITCH); break;
+                case 'S': lastOverlayCmdMs = now; Env.log("cmd SWITCH");  Env.switchToPrevious(ctx); break;
                 default: break; // bỏ qua \n và ký tự lạ
             }
         }
@@ -223,7 +251,8 @@ public final class Main {
                     }
                     if (pendingUp) {
                         if (tracking) {
-                            evaluate(startX, startY, curX, curY, SystemClock.uptimeMillis() - startT);
+                            evaluate(startX, startY, curX, curY,
+                                    SystemClock.uptimeMillis() - startT, startT);
                         }
                         tracking = false;
                         pendingUp = false;
@@ -233,13 +262,26 @@ public final class Main {
         }
     }
 
-    private static void evaluate(int sx, int sy, int ex, int ey, long dur) {
+    private static boolean overlayHandledSwipe(long startT) {
+        long cutoff = startT - 150;
+        if (lastOverlayDownMs >= cutoff || lastOverlayCmdMs >= cutoff) return true;
+        // Khoảng chờ ngắn đề phòng lệnh TCP đầu tiên sau khi reconnect đến trễ vài ms.
+        try { Thread.sleep(25); } catch (InterruptedException ignored) {}
+        return lastOverlayDownMs >= cutoff || lastOverlayCmdMs >= cutoff;
+    }
+
+    private static void evaluate(int sx, int sy, int ex, int ey, long dur, long startT) {
         String g = G.classify(sx, sy, ex, ey, dur);
         if (g == null) {
             if (debug) Env.log("ignore: s=(" + sx + "," + sy + ") e=(" + ex + "," + ey + ") dur=" + dur);
             return;
         }
-        Env.log("gesture: " + g + " s=(" + sx + "," + sy + ") e=(" + ex + "," + ey + ") dur=" + dur);
+        if (hybrid && overlayHandledSwipe(startT)) {
+            if (debug) Env.log("hybrid skip (overlay handled): " + g);
+            return;
+        }
+        Env.log((hybrid ? "fallback " : "gesture: ") + g
+                + " s=(" + sx + "," + sy + ") e=(" + ex + "," + ey + ") dur=" + dur);
         switch (g) {
             case Gestures.BACK:    Env.key(KeyEvent.KEYCODE_BACK); break;
             case Gestures.HOME:    Env.key(KeyEvent.KEYCODE_HOME); break;

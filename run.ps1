@@ -1,4 +1,4 @@
-# Tiện ích điều khiển EdgeGest qua ADB (Windows PowerShell).
+﻿# Tiện ích điều khiển EdgeGest qua ADB (Windows PowerShell).
 # Dùng:  .\run.ps1 <lệnh> [tham số]
 #
 #   push-helper              Build dex helper và đẩy lên /data/local/tmp/edgegest
@@ -8,7 +8,8 @@
 #   build-apk                Build APK overlay
 #   push-apk                 Đẩy APK vào /sdcard/Download và mở trình cài (MIUI chặn adb install)
 #   grant                    Cấp quyền overlay (SYSTEM_ALERT_WINDOW) cho APK
-#   overlay <side> <bottom> [debug]   Bật/chỉnh overlay, vd: .\run.ps1 overlay 40 24 true
+#   overlay <side> <bottom> [debug] [topGuard%] [bottomGap]
+#                                    Bật/chỉnh overlay, vd: .\run.ps1 overlay 40 24 false 11 0
 #   overlay-stop             Tắt overlay
 #   log                      Xem log helper
 #   fsg <0|1>                Ẩn (1) / hiện (0) thanh 3 nút
@@ -17,7 +18,9 @@ param(
     [Parameter(Position = 0)][string]$cmd,
     [Parameter(Position = 1)][string]$a1,
     [Parameter(Position = 2)][string]$a2,
-    [Parameter(Position = 3)][string]$a3
+    [Parameter(Position = 3)][string]$a3,
+    [Parameter(Position = 4)][string]$a4,
+    [Parameter(Position = 5)][string]$a5
 )
 $ErrorActionPreference = "Stop"
 $root = $PSScriptRoot
@@ -30,7 +33,7 @@ switch ($cmd) {
         adb shell mkdir -p $dir
         adb push "$root\device\start-server.sh" "$dir/start-server.sh" | Out-Null
         adb shell "sed -i 's/\r`$//' $dir/start-server.sh; chmod 755 $dir/start-server.sh"
-        adb shell sh "$dir/start-server.sh"
+        adb shell sh "$dir/start-server.sh" $a1
     }
     "helper-reader" {
         adb push "$root\device\start.sh" "$dir/start.sh" | Out-Null
@@ -49,7 +52,10 @@ switch ($cmd) {
         $side = if ($a1) { $a1 } else { 40 }
         $bottom = if ($a2) { $a2 } else { 24 }
         $debug = if ($a3) { $a3 } else { "false" }
-        adb shell am start-foreground-service -n "$pkg/.OverlayService" --ei side $side --ei bottom $bottom --ez debug $debug
+        $extraArgs = @("--ei", "side", $side, "--ei", "bottom", $bottom, "--ez", "debug", $debug)
+        if ($a4) { $extraArgs += @("--ei", "topGuard", $a4) }
+        if ($a5) { $extraArgs += @("--ei", "bottomGap", $a5) }
+        adb shell am start-foreground-service -n "$pkg/.OverlayService" @extraArgs
         Start-Sleep 1
         adb shell "logcat -d -s EdgeGest:* | grep 'strips added' | tail -1"
     }
@@ -58,7 +64,7 @@ switch ($cmd) {
     "fsg"          { adb shell settings put global force_fsg_nav_bar $a1; adb shell settings get global force_fsg_nav_bar }
     "status" {
         Write-Host "--- helper ---"
-        adb shell "ps -A -o PID,ARGS | grep -i 'Main --server\|Main --' | grep -v grep"
+        adb shell "ps -A -o PID,ARGS | grep -i -E 'edgegest|Main --' | grep -v grep"
         Write-Host "--- overlay windows ---"
         adb shell "dumpsys window | grep -E 'EdgeGest(Left|Right|Bottom)'"
         Write-Host "--- force_fsg_nav_bar ---"

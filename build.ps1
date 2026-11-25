@@ -27,6 +27,7 @@ if ($Push) {
     adb shell mkdir -p /data/local/tmp/edgegest
     adb push "$out\edgegest.dex" /data/local/tmp/edgegest/edgegest.dex
     adb push "$root\device\start.sh" /data/local/tmp/edgegest/start.sh
+    adb push "$root\device\start-server.sh" /data/local/tmp/edgegest/start-server.sh
     adb push "$root\device\stop.sh" /data/local/tmp/edgegest/stop.sh
     adb shell "sed -i 's/\r$//' /data/local/tmp/edgegest/*.sh; chmod 755 /data/local/tmp/edgegest/*.sh"
     Write-Host "Pushed to /data/local/tmp/edgegest"

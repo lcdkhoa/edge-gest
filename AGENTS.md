@@ -12,6 +12,10 @@ file is what is non‑obvious when changing the code.
 Communicate with this user in **Vietnamese** (Tiếng Việt), with correct diacritics. Keep code identifiers
 and technical terms in their original form.
 
+**Changelog rule:** After **every** change to code, scripts, manifest, or docs, append a new entry
+`{ id, date, decision, notes, tags }` (incrementing `D-XX`) to `DECISIONS[]` in `changelog.html`
+(set `reverses: true` when superseding an earlier decision).
+
 ## Two‑component architecture (the key mental model)
 
 Navigation is split across two processes that talk over **TCP `127.0.0.1:47820`**:
@@ -19,11 +23,17 @@ Navigation is split across two processes that talk over **TCP `127.0.0.1:47820`*
 1. **Overlay APK** — `app/`, package `com.lcd.edgegest`, runs as a normal app uid. Draws thin
    `TYPE_APPLICATION_OVERLAY` strips at the screen edges. An overlay window receives `ACTION_DOWN`, so it
    **consumes** the touch and the app underneath never sees it — this is the whole point: it removes the
-   gesture/app double‑trigger. `StripView` classifies the swipe; `GestureClient` sends one char
-   (`B`/`H`/`R`/`S`) to the helper. `OverlayService` keeps the strips alive and rebuilds them on rotation.
-2. **Helper injector** — `src/`, runs via `app_process` as uid `shell` (2000). In `--server` mode it
-   listens on the TCP port and injects the key (`KEYCODE_BACK` / `HOME` / `APP_SWITCH`) via `InputManager`
-   (fallback: the `input` command), and keeps `force_fsg_nav_bar=1` to hide the 3‑button bar.
+   gesture/app double‑trigger. `StripView` classifies the swipe; `GestureClient` sends `'D'` on
+   `ACTION_DOWN` and one command char (`B`/`H`/`R`/`S`) to the helper. `OverlayService` keeps the strips
+   alive and rebuilds them on rotation. `ShizukuProvider` (`com.lcd.edgegest.shizuku`) receives the Shizuku Binder via `sendBinder`, and
+   `ShizukuStarter` talks to `moe.shizuku.privileged.api` over Binder to launch `start-server.sh` from
+   `BootReceiver`/`MainActivity`.
+2. **Helper injector** — `src/`, runs via `app_process` as uid `shell` (2000). In `--server --hybrid` mode
+   (`device/start-server.sh`) it listens on the TCP port, injects keys (`KEYCODE_BACK` / `HOME` /
+   `APP_SWITCH`) via `InputManager` (fallback: `input`), keeps `force_fsg_nav_bar=1`, and keeps
+   `ReaderLoop` (`/dev/input/eventX`) running as an automatic fallback only when the overlay did not
+   receive `ACTION_DOWN` (`'D'` — e.g. when a banking app hides overlays via
+   `HIDE_NON_SYSTEM_OVERLAY_WINDOWS`).
 
 **Why the split:** a normal app cannot inject global Back/Recents without Accessibility or the
 signature‑level `INJECT_EVENTS`. The helper has `INJECT_EVENTS` (uid shell) but **cannot create the
@@ -45,11 +55,13 @@ Needs Android SDK **build-tools 34.0.0** + **platform android-35** and a JDK. Th
 .\build-apk.ps1          #             -> app\out\edgegest.apk
 ```
 
-**Hard constraint — no lambdas, anonymous classes, method references, or non‑static inner classes in any
-Java file.** `d8` 34.0.0 crashes (`NullPointerException ... String.length()`) on the synthetic classes a
-modern JDK emits, and `android.jar` lacks `LambdaMetafactory` so `-source 8` lambdas fail to compile. Use
-only **static nested classes with explicit constructors** (see `StripView.HoldCheck`,
-`Main.CommandServer`). Compilation is `-source 8 -target 8`.
+**Hard constraint — no lambdas, anonymous classes, method references, non‑static inner classes, or generic
+interface implementations emitting synthetic bridge methods in any Java file.** `d8` 34.0.0 crashes
+(`NullPointerException ... String.length()`) on synthetic classes or bridge methods emitted by a modern
+JDK (e.g., use raw `Parcelable.Creator` instead of `Parcelable.Creator<T>`), and `android.jar` lacks
+`LambdaMetafactory` so `-source 8` lambdas fail to compile. Use only **static nested classes with explicit
+constructors** (see `StripView.HoldCheck`, `Main.CommandServer`) and package-private access where nested
+classes touch enclosing members. Compilation is `-source 8 -target 8`.
 
 **MIUI blocks `adb install`** (`INSTALL_FAILED_USER_RESTRICTED`) even with "Install via USB" enabled. Do
 **not** work around it by spoofing the installer id (`-i com.android.vending`) — that was explicitly
@@ -69,12 +81,12 @@ runtime permission.
 .\run.ps1 status ; .\run.ps1 log
 ```
 
-`OverlayService.onStartCommand` reads `side`/`bottom`/`debug` from **Intent extras**
-(`am start-foreground-service ... --ei side N --ei bottom N --ez debug true|false`), so strip width and the
-debug coloring tune live without a rebuild. These extras are **not persisted** — a reboot falls back to
-`DEF_SIDE`/`DEF_BOTTOM` (see TODO). Don't `am force-stop` then immediately restart in one session:
-`START_STICKY` races a null‑intent restart against your command (guarded via the `started` flag, but avoid
-it).
+`OverlayService.onStartCommand` reads `side`/`bottom`/`topGuard`/`bottomGap`/`debug` from **Intent extras**
+(`am start-foreground-service ... --ei side N --ei bottom N --ez debug true|false --ei topGuard P --ei bottomGap G`),
+and persists any supplied extras back to `SharedPreferences` (`edgegest`) so `BootReceiver` keeps the
+tuned values across reboots (defaults: `40`/`24`/`11%`/`0dp`). Don't `am force-stop` then immediately
+restart in one session: `START_STICKY` races a null‑intent restart against your command (guarded via the
+`started` flag, but avoid it).
 
 **Emergency recovery** if navigation gets stuck (no nav bar and no working gesture): `.\run.ps1 fsg 0`
 restores the 3‑button bar. The helper's exit wrapper also resets `force_fsg_nav_bar` to 0.
@@ -86,13 +98,11 @@ so touches can't be simulated — verify gestures by hand on the device while ta
 `/data/local/tmp/edgegest/edgegest.log` (helper logs `cmd BACK` etc.; the APK logs under logcat tag
 `EdgeGest`). `device/sim.sh` exists but only works where writing the touch node is permitted.
 
-## Open work (see README "Trạng thái & TODO")
+## Remaining on-device verification (see README "Trạng thái & TODO")
 
-1. `MainActivity` renders blank — likely a missing `android:theme`; the app is currently driven entirely
-   via `run.ps1`/ADB. Fixing it (plus auto‑starting the service on launch) is the main UX gap.
-2. Persist the Intent‑extra config to `SharedPreferences` so `BootReceiver` restores the tuned width after
-   reboot (or just change `DEF_SIDE`/`DEF_BOTTOM`; the user settled on side=40dp, bottom=24dp).
-3. Auto‑start the helper on boot via **Shizuku** (`start-server.sh`); an ADB‑launched process dies on
-   reboot.
-4. Verify whether the user's bank apps hide the overlay (`HIDE_NON_SYSTEM_OVERLAY_WINDOWS`); if so, run the
-   `/dev/input` fallback alongside the overlay only while it is hidden.
+All planned code changes (`MainActivity` theme/auto-start, `SharedPreferences` persistence, `BootReceiver`
+Direct Boot guard, `topGuard`/`bottomGap` + `HoldCheck`, `--hybrid` `/dev/input` fallback, and
+`ShizukuProvider`/`ShizukuStarter`) are implemented, built cleanly, and verified live on device (`c92b13cf`).
+Only two manual checks remain:
+1. Verify reboot auto-start end-to-end (requires Shizuku's "Start on boot" / Wireless debugging enabled).
+2. Open a bank app to verify `--hybrid` fallback and fine-tune `topGuard`/`bottomGap` if needed.

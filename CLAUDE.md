@@ -9,6 +9,10 @@ this file captures what is non‑obvious when changing the code.
 
 > Other agents (Codex, Cursor, Gemini) read `AGENTS.md` (the canonical cross‑agent copy); `GEMINI.md` and
 > `.cursor/rules/` point there. Keep `CLAUDE.md` and `AGENTS.md` in sync when changing guidance.
+>
+> **Changelog rule:** After **every** change to code, scripts, manifest, or docs, append a new entry
+> `{ id, date, decision, notes, tags }` (incrementing `D-XX`) to `DECISIONS[]` in `changelog.html`
+> (set `reverses: true` when superseding an earlier decision).
 
 ## Two‑component architecture (the key mental model)
 
@@ -18,10 +22,13 @@ Navigation is split across two processes that talk over **TCP `127.0.0.1:47820`*
    `TYPE_APPLICATION_OVERLAY` strips at the screen edges. Because an overlay window receives the
    `ACTION_DOWN`, it **consumes** the touch so the app underneath never sees it (this is the whole point —
    it eliminates the gesture/app double‑trigger). `StripView` classifies the swipe and `GestureClient`
-   sends a single char (`B`/`H`/`R`/`S`) to the helper.
-2. **Helper injector** (`src/`, runs via `app_process` as uid `shell` 2000). In `--server` mode it
-   listens on the TCP port and injects the key (`KEYCODE_BACK/HOME/APP_SWITCH`) via `InputManager`
-   (falling back to the `input` command). It also keeps `force_fsg_nav_bar=1` to hide the 3‑button bar.
+   sends `'D'` on `ACTION_DOWN` and a single char (`B`/`H`/`R`/`S`) to the helper. `ShizukuProvider`
+   receives the Shizuku Binder via `sendBinder`, and `ShizukuStarter` launches `start-server.sh`
+   via Shizuku Binder from `BootReceiver`/`MainActivity`.
+2. **Helper injector** (`src/`, runs via `app_process` as uid `shell` 2000). In `--server --hybrid` mode
+   it listens on the TCP port, injects keys (`KEYCODE_BACK/HOME/APP_SWITCH`) via `InputManager`
+   (falling back to `input`), keeps `force_fsg_nav_bar=1`, and runs `ReaderLoop` (`/dev/input/eventX`)
+   in parallel as an automatic fallback whenever the overlay did not report `'D'` (e.g. inside banking apps).
 
 **Why the split:** a normal app cannot inject global Back/Recents without Accessibility or the
 signature‑level `INJECT_EVENTS`. The helper has `INJECT_EVENTS` (uid shell) but **cannot create the
@@ -43,8 +50,9 @@ as `$env:LOCALAPPDATA\Android\Sdk` in the build scripts.
 .\build-apk.ps1          # -> app\out\edgegest.apk
 ```
 
-**Hard constraint — no lambdas/anonymous/inner classes anywhere in Java.** `d8` 34.0.0 crashes
-(`NullPointerException ... String.length()`) on synthetic classes emitted by a modern JDK, and
+**Hard constraint — no lambdas/anonymous/inner classes or generic-interface bridge methods anywhere in Java.**
+`d8` 34.0.0 crashes (`NullPointerException ... String.length()`) on synthetic classes or bridge methods
+emitted by a modern JDK (e.g., use raw `Parcelable.Creator` instead of `Parcelable.Creator<T>`), and
 `android.jar` lacks `LambdaMetafactory` so `-source 8` lambdas fail to compile. Use only **static nested
 classes with explicit constructors** (see `StripView.HoldCheck`, `Main.CommandServer`). Compilation is
 `-source 8 -target 8`.
@@ -66,12 +74,11 @@ on. Do **not** spoof the installer id. Instead push to the device and have the u
 .\run.ps1 status ; .\run.ps1 log
 ```
 
-`OverlayService.onStartCommand` reads `side`/`bottom`/`debug` from **Intent extras** (via
-`am start-foreground-service ... --ei side N --ei bottom N --ez debug true|false`), so strip width and the
-debug coloring are tuned live without a rebuild. These extras are **not persisted** — a reboot falls back
-to `DEF_SIDE`/`DEF_BOTTOM` (see TODO in README). Do not `am force-stop` then immediately restart during a
-session: `START_STICKY` races a null‑intent restart against your command (guarded now via the `started`
-flag, but avoid it).
+`OverlayService.onStartCommand` reads `side`/`bottom`/`topGuard`/`bottomGap`/`debug` from **Intent extras**
+(via `am start-foreground-service ... --ei side N --ei bottom N --ez debug true|false --ei topGuard P --ei bottomGap G`),
+and persists supplied extras to `SharedPreferences` (`edgegest`) so reboots keep tuned values (defaults:
+`40`/`24`/`11%`/`0dp`). Do not `am force-stop` then immediately restart during a session: `START_STICKY`
+races a null‑intent restart against your command (guarded now via the `started` flag, but avoid it).
 
 **Emergency recovery** if navigation gets stuck (no nav bar, no gesture):
 `.\run.ps1 fsg 0` (restores the 3‑button bar). The helper's exit wrapper also resets it.

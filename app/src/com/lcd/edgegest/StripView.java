@@ -13,7 +13,7 @@ import android.view.View;
  *
  *  LEFT/RIGHT: vuốt vào trong          -> Back ('B')
  *  BOTTOM    : vuốt lên (nhanh)        -> Home ('H')
- *              vuốt lên rồi giữ        -> Recents ('R')  (quyết định theo thời lượng lúc nhấc tay)
+ *              vuốt lên rồi giữ        -> Recents ('R')  (rung haptic mốc 300ms khi đang giữ)
  *              vuốt ngang              -> app trước ('S')
  */
 final class StripView extends View {
@@ -25,22 +25,25 @@ final class StripView extends View {
     private final GestureClient client;
     private final float backDist, homeDist, switchDist;
     private final long holdMs = 300;
+    private final HoldCheck holdCheck;
 
     private float x0, y0;
     private long startT;
-    private int armed = NONE;
+    int armed = NONE;
+    boolean holdFired;
 
     StripView(Context ctx, int edge, GestureClient client, float density, int debugColor) {
         super(ctx);
         this.edge = edge;
         this.client = client;
+        this.holdCheck = new HoldCheck(this);
         backDist = 40 * density;
         homeDist = 50 * density;
         switchDist = 75 * density;
         if (debugColor != 0) setBackgroundColor(debugColor);
     }
 
-    private void buzz() {
+    void buzz() {
         try {
             performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY,
                     HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING);
@@ -48,7 +51,15 @@ final class StripView extends View {
     }
 
     private void arm(int mode) {
-        if (armed != mode && mode != NONE) buzz();
+        if (armed != mode) {
+            if (mode != NONE) buzz();
+            if (edge == BOTTOM && mode == HOME && !holdFired) {
+                long rem = Math.max(0, holdMs - (SystemClock.uptimeMillis() - startT));
+                postDelayed(holdCheck, rem);
+            } else {
+                removeCallbacks(holdCheck);
+            }
+        }
         armed = mode;
     }
 
@@ -58,8 +69,11 @@ final class StripView extends View {
         float x = e.getRawX(), y = e.getRawY();
         switch (e.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:
-                x0 = x; y0 = y; armed = NONE;
+                x0 = x; y0 = y; armed = NONE; holdFired = false;
+                removeCallbacks(holdCheck);
                 startT = SystemClock.uptimeMillis();
+                // Báo ngay cho helper (chế độ --hybrid) biết overlay đã nhận chạm và nuốt cử chỉ này.
+                client.send('D');
                 return true;
 
             case MotionEvent.ACTION_MOVE:
@@ -67,21 +81,23 @@ final class StripView extends View {
                     float up = y0 - y, dx = x - x0;
                     if (Math.abs(dx) > switchDist && Math.abs(dx) > up * 1.5f) arm(SWITCH);
                     else if (up > homeDist) arm(HOME);
-                    else armed = NONE;
+                    else arm(NONE);
                 } else {
                     float in = edge == LEFT ? x - x0 : x0 - x;
                     float dy = Math.abs(y - y0);
                     if (in > backDist && dy < in * 1.2f) arm(BACK);
-                    else armed = NONE;
+                    else arm(NONE);
                 }
                 return true;
 
             case MotionEvent.ACTION_UP:
+                removeCallbacks(holdCheck);
                 fire();
                 armed = NONE;
                 return true;
 
             case MotionEvent.ACTION_CANCEL:
+                removeCallbacks(holdCheck);
                 armed = NONE;
                 return true;
         }
@@ -95,9 +111,25 @@ final class StripView extends View {
             case SWITCH: client.send('S'); break;
             case HOME:
                 // Vuốt lên rồi giữ (chạm lâu) -> Recents; vuốt lên dứt khoát -> Home.
-                client.send(dur >= holdMs ? 'R' : 'H');
+                client.send((holdFired || dur >= holdMs) ? 'R' : 'H');
                 break;
             default: break;
+        }
+    }
+
+    private static final class HoldCheck implements Runnable {
+        private final StripView view;
+
+        HoldCheck(StripView view) {
+            this.view = view;
+        }
+
+        @Override
+        public void run() {
+            if (view.armed == HOME && !view.holdFired) {
+                view.holdFired = true;
+                view.buzz();
+            }
         }
     }
 }
