@@ -481,6 +481,13 @@
       notes: "Quy định mọi agent khi sửa code, script, manifest hoặc tài liệu đều phải thêm entry `{ id, date, decision, notes, tags }` vào `DECISIONS[]` trong `changelog.html` (gắn `reverses: true` nếu thay thế quyết định trước). Đồng bộ thông tin `ShizukuProvider` và trạng thái kiểm chứng thực tế trên `c92b13cf` vào `AGENTS.md` và `CLAUDE.md`.",
       tags: ["Docs", "Ops"],
     },
+    {
+      id: "D-11",
+      date: "2026-11-25",
+      decision: "**Thiết kế lại `MainActivity` theo nhóm Options có Collapsible & mở rộng `run.ps1 grant`**",
+      notes: "Thay giao diện phẳng bằng thẻ tổng quan 2×2 (Overlay, Dải mép, Helper :47820, Shizuku) + nút chính BẬT/TẮT và 4 mục collapsible (`Quyền & Helper`, `Kích thước & Vùng mép` kèm stepper −/+ và nút đặt lại mặc định, `Hiển thị & Cử chỉ` với `Switch`, `Chẩn đoán & Khẩn cấp`). Dùng `GradientDrawable` thích ứng sáng/tối và static nested classes (`SectionToggle`, `StepAction`, `GeometryWatcher`, `DebugSwitchListener`) tương thích `d8` 34.0.0. Mở rộng `run.ps1 grant` cấp song song `SYSTEM_ALERT_WINDOW`, `moe.shizuku.manager.permission.API_V23`, `POST_NOTIFICATIONS`, và `ACCESS_LOCAL_NETWORK`.",
+      tags: ["UI", "Ops"],
+    },
   ];
   // <</DECISIONS>>
 

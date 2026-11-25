@@ -1,4 +1,4 @@
-﻿# Tiện ích điều khiển EdgeGest qua ADB (Windows PowerShell).
+# Tiện ích điều khiển EdgeGest qua ADB (Windows PowerShell).
 # Dùng:  .\run.ps1 <lệnh> [tham số]
 #
 #   push-helper              Build dex helper và đẩy lên /data/local/tmp/edgegest
@@ -47,7 +47,13 @@ switch ($cmd) {
         adb shell am start -a android.intent.action.VIEW -d "file:///sdcard/Download/edgegest.apk" -t "application/vnd.android.package-archive"
         Write-Host "Mở trình cài trên điện thoại -> bấm Install/Update"
     }
-    "grant"        { adb shell appops set $pkg SYSTEM_ALERT_WINDOW allow; adb shell cmd appops get $pkg SYSTEM_ALERT_WINDOW }
+    "grant" {
+        adb shell appops set $pkg SYSTEM_ALERT_WINDOW allow
+        adb shell pm grant $pkg moe.shizuku.manager.permission.API_V23
+        adb shell pm grant $pkg android.permission.POST_NOTIFICATIONS
+        adb shell pm grant $pkg android.permission.ACCESS_LOCAL_NETWORK 2>$null
+        adb shell cmd appops get $pkg SYSTEM_ALERT_WINDOW
+    }
     "overlay" {
         $side = if ($a1) { $a1 } else { 40 }
         $bottom = if ($a2) { $a2 } else { 24 }
