@@ -1,0 +1,15 @@
+# Build artifacts
+out/
+*.dex
+*.apk
+*.class
+*.idsig
+
+# Pulled system APKs / temp
+apks/
+fw/
+svc/
+
+# OS
+Thumbs.db
+.DS_Store
