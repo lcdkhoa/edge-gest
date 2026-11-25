@@ -65,7 +65,6 @@ public final class MainActivity extends Activity implements View.OnClickListener
     private static final int REQ_BACKUP_FILE = 202;
     private static final int REQ_RESTORE_FILE = 203;
 
-    private static final String CMD_ADB_START = "adb shell sh /data/local/tmp/edgegest/start-server.sh";
     private static final String CMD_ADB_GRANT = "adb shell \"appops set com.lcd.edgegest SYSTEM_ALERT_WINDOW allow; "
             + "pm grant com.lcd.edgegest moe.shizuku.manager.permission.API_V23; "
             + "pm grant com.lcd.edgegest android.permission.POST_NOTIFICATIONS; "
@@ -567,8 +566,8 @@ public final class MainActivity extends Activity implements View.OnClickListener
         body.addView(p1);
 
         body.addView(adbCommandCard(Strings.pick(vi,
-                "1. Bật Helper không cần Shizuku (chạy sau khi reboot):",
-                "1. Start Helper without Shizuku (after reboot):"), CMD_ADB_START));
+                "1. Bật Helper không cần Shizuku (tự chạy từ APK):",
+                "1. Start Helper without Shizuku (runs from APK):"), buildAdbStartCommand()));
         body.addView(ui.vSpace(8));
         body.addView(adbCommandCard(Strings.pick(vi,
                 "2. Cấp toàn bộ quyền APK qua ADB (1 lần):",
@@ -577,6 +576,18 @@ public final class MainActivity extends Activity implements View.OnClickListener
         body.addView(adbCommandCard(Strings.pick(vi,
                 "3. Khẩn cấp hiện lại thanh 3 nút:",
                 "3. Emergency restore 3-button nav bar:"), CMD_ADB_FSG0));
+    }
+
+    private String buildAdbStartCommand() {
+        String apkPath = getApplicationInfo().sourceDir;
+        if (apkPath == null || apkPath.isEmpty()) {
+            return "adb shell sh /data/local/tmp/edgegest/start-server.sh";
+        }
+        return "adb shell \"killall edgegest 2>/dev/null; sleep 0.3; mkdir -p /data/local/tmp/edgegest; "
+                + "setsid sh -c 'CLASSPATH=" + apkPath + " app_process /system/bin --nice-name=edgegest "
+                + "com.lcd.edgegest.Main --server --hybrid >/data/local/tmp/edgegest/edgegest.log 2>&1; "
+                + "cmd role get-role-holders android.app.role.HOME | grep -q com.miui.home || "
+                + "cmd settings put global force_fsg_nav_bar 0' </dev/null >/dev/null 2>&1 &\"";
     }
 
     // ---- Builders ----
@@ -1574,8 +1585,8 @@ public final class MainActivity extends Activity implements View.OnClickListener
             String msg = ok
                     ? Strings.pick(activity.vi, "Helper server đã chạy", "Helper server started")
                     : Strings.pick(activity.vi,
-                            "Không bật được helper (kiểm tra đã push-helper chưa)",
-                            "Failed to start helper (check push-helper)");
+                            "Không bật được helper qua Shizuku (thử lệnh ADB bên dưới)",
+                            "Failed to start helper via Shizuku (try ADB command below)");
             Toast.makeText(activity, msg, Toast.LENGTH_LONG).show();
             activity.refresh();
         }

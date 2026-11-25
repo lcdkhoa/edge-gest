@@ -530,6 +530,13 @@
       notes: "Thêm `UiKit.BackArrowView` và `UiKit.RainbowDotView`; nâng `AnimConfigActivity` với nút Back vector cân giữa, thay dialog hex đơn lẻ bằng hộp thoại Bánh xe màu HSV (`ColorWheelView` dùng `SweepGradient` + `RadialGradient`, thanh độ sáng `SeekBar` và ô `#RRGGBB` đồng bộ 2 chiều). Trong `MainActivity` và `AnimConfigActivity`, tắt pill tóm tắt cạnh tiêu đề các mục collapsible, bỏ dấu `→` rớt dòng và ẩn các mô tả helper text dư thừa.",
       tags: ["UI", "Icons", "Animation"],
     },
+    {
+      id: "D-18",
+      date: "2026-11-25",
+      decision: "**Gộp Helper (`src/`) vào `edgegest.apk` duy nhất (`build-apk.ps1` + `ShizukuStarter` + lệnh ADB tự tham chiếu `base.apk`)**",
+      notes: "Sửa `build-apk.ps1` biên dịch chung cả `app/src` và `src/` vào `classes.dex` của `edgegest.apk`. Cập nhật `ShizukuStarter.startHelper()` truyền `ctx.getApplicationInfo().sourceDir` (`base.apk`) cho `app_process` qua Shizuku `TX_NEW_PROCESS` mà không cần đẩy rời `edgegest.dex` hay `start-server.sh`. `MainActivity` sinh động lệnh ADB từ `sourceDir` (dùng `killall edgegest` thay `pkill -f`), và `device/start-server.sh` ưu tiên `pm path com.lcd.edgegest` nếu có.",
+      tags: ["Helper", "Shizuku", "Overlay"],
+    },
   ];
   // <</DECISIONS>>
 

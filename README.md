@@ -51,8 +51,8 @@ Yêu cầu: Android SDK (build-tools 34.0.0, platform android-35), JDK (đã tes
 > **chỉ dùng static nested class, không lambda/method-ref** trong code (xem các file hiện có).
 
 ```powershell
-.\build.ps1 -Push        # build helper dex -> /data/local/tmp/edgegest
-.\build-apk.ps1          # build app\out\edgegest.apk
+.\build-apk.ps1          # build 1 file app\out\edgegest.apk (đã gộp cả Helper + Overlay + UI)
+.\build.ps1 -Push        # (tuỳ chọn cho dev) đẩy rời edgegest.dex -> /data/local/tmp/edgegest
 ```
 
 ### Cài APK (MIUI chặn `adb install`)
@@ -82,8 +82,7 @@ tài khoản Mi). Cách dùng: đẩy APK vào máy rồi bấm cài thủ công
 .\run.ps1 fsg 0                        # hiện lại thanh 3 nút khẩn cấp
 ```
 
-Thứ tự khởi động đầy đủ: `push-helper` → `helper-server` → (`build-apk` → `push-apk` nếu đổi code APK)
-→ `grant` → `overlay 40 24 false`.
+Thứ tự khởi động đầy đủ (chỉ cần 1 file APK): `build-apk` → `push-apk` (bấm cài trên máy) → `grant` → bật Shizuku hoặc chạy `.\run.ps1 helper-server` (hoặc copy lệnh ADB trong app) → `overlay 40 24 false`.
 
 Khẩn cấp nếu kẹt điều hướng: `.\run.ps1 fsg 0` (hoặc `adb shell settings put global force_fsg_nav_bar 0`).
 
@@ -92,7 +91,7 @@ Khẩn cấp nếu kẹt điều hướng: `.\run.ps1 fsg 0` (hoặc `adb shell 
 ## Tự chạy sau khi khởi động lại
 
 - **APK**: `BootReceiver` (`BOOT_COMPLETED`, kiểm tra `UserManager.isUserUnlocked()` trước khi đọc CE `SharedPreferences`) tự bật `OverlayService` với cấu hình đã lưu. Cần bật **Autostart** cho EdgeGest trong Security/Permissions của HyperOS.
-- **Helper**: tiến trình ADB chết khi reboot. `BootReceiver` (và `MainActivity`) đã tích hợp `ShizukuStarter` gọi `sh /data/local/tmp/edgegest/start-server.sh` qua **Shizuku** (`moe.shizuku.privileged.api`) ngay sau khi mở khoá. Chỉ cần Shizuku được kích hoạt (Wireless debugging) và đã cấp quyền cho EdgeGest.
+- **Helper**: tiến trình ADB chết khi reboot. `BootReceiver` (và `MainActivity`) đã tích hợp `ShizukuStarter` khởi chạy trực tiếp `com.lcd.edgegest.Main --server --hybrid` từ file `base.apk` đã cài (không cần đẩy rời `start-server.sh`/`edgegest.dex`) qua **Shizuku** (`moe.shizuku.privileged.api`) ngay sau khi mở khoá. Chỉ cần Shizuku được kích hoạt (Wireless debugging) và đã cấp quyền cho EdgeGest.
 
 ---
 

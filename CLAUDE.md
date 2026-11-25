@@ -23,8 +23,8 @@ Navigation is split across two processes that talk over **TCP `127.0.0.1:47820`*
    `ACTION_DOWN`, it **consumes** the touch so the app underneath never sees it (this is the whole point —
    it eliminates the gesture/app double‑trigger). `StripView` classifies the swipe and `GestureClient`
    sends `'D'` on `ACTION_DOWN` and a single char (`B`/`H`/`R`/`S`) to the helper. `ShizukuProvider`
-   receives the Shizuku Binder via `sendBinder`, and `ShizukuStarter` launches `start-server.sh`
-   via Shizuku Binder from `BootReceiver`/`MainActivity`.
+   receives the Shizuku Binder via `sendBinder`, and `ShizukuStarter` launches the bundled helper
+   (`com.lcd.edgegest.Main --server --hybrid` directly from `sourceDir` `base.apk`) via Shizuku Binder from `BootReceiver`/`MainActivity`.
 2. **Helper injector** (`src/`, runs via `app_process` as uid `shell` 2000). In `--server --hybrid` mode
    it listens on the TCP port, injects keys (`KEYCODE_BACK/HOME/APP_SWITCH`) via `InputManager`
    (falling back to `input`), keeps `force_fsg_nav_bar=1`, and runs `ReaderLoop` (`/dev/input/eventX`)
@@ -46,8 +46,8 @@ Requires Android SDK **build-tools 34.0.0** + **platform android-35**, and a JDK
 as `$env:LOCALAPPDATA\Android\Sdk` in the build scripts.
 
 ```powershell
-.\build.ps1 -Push        # helper dex -> /data/local/tmp/edgegest
-.\build-apk.ps1          # -> app\out\edgegest.apk
+.\build-apk.ps1          # -> app\out\edgegest.apk (bundles both app/src UI & src helper)
+.\build.ps1 -Push        # optional -> helper dex only to /data/local/tmp/edgegest
 ```
 
 **Hard constraint — no lambdas/anonymous/inner classes or generic-interface bridge methods anywhere in Java.**

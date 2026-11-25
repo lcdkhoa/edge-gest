@@ -39,7 +39,19 @@ final class ShizukuStarter {
     private static final int TX_CHECK_SELF_PERMISSION = 16;
     private static final int TX_ATTACH_APPLICATION = 18;
 
-    private static final String START_SCRIPT = "/data/local/tmp/edgegest/start-server.sh";
+    private static final String HELPER_BOOT_SH =
+            "export EDGEGEST_APK=\"$1\"; "
+            + "PID=$(pidof edgegest); "
+            + "if [ -n \"$PID\" ]; then kill \"$PID\"; sleep 1; fi; "
+            + "mkdir -p /data/local/tmp/edgegest; : > /data/local/tmp/edgegest/edgegest.log; "
+            + "setsid sh -c 'CLASSPATH=\"$EDGEGEST_APK\" app_process /system/bin --nice-name=edgegest "
+            + "com.lcd.edgegest.Main --server --hybrid >>/data/local/tmp/edgegest/edgegest.log 2>&1; "
+            + "cmd role get-role-holders android.app.role.HOME | grep -q com.miui.home || "
+            + "cmd settings put global force_fsg_nav_bar 0' </dev/null >/dev/null 2>&1 & "
+            + "i=0; while [ $i -lt 30 ]; do "
+            + "if grep -q \"command server started\" /data/local/tmp/edgegest/edgegest.log 2>/dev/null; then "
+            + "cmd settings put global force_fsg_nav_bar 1; break; fi; "
+            + "sleep 0.2; i=$((i+1)); done";
     private static final IBinder APP_TOKEN = new AppToken();
 
     private static volatile IBinder remoteBinder;
@@ -185,12 +197,15 @@ final class ShizukuStarter {
         if (s == null || !ensureAttached(s, ctx.getPackageName())) return false;
         if (!checkSelfPermission(s)) return false;
 
+        String apkPath = ctx.getApplicationInfo().sourceDir;
+        if (apkPath == null || apkPath.isEmpty()) return false;
+
         Parcel data = Parcel.obtain();
         Parcel reply = Parcel.obtain();
         IBinder remoteProc = null;
         try {
             data.writeInterfaceToken(DESCRIPTOR);
-            data.writeStringArray(new String[] {"/system/bin/sh", START_SCRIPT});
+            data.writeStringArray(new String[] {"/system/bin/sh", "-c", HELPER_BOOT_SH, "sh", apkPath});
             data.writeStringArray(null);
             data.writeString(null);
             s.transact(TX_NEW_PROCESS, data, reply, 0);

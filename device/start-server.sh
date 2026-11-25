@@ -4,15 +4,23 @@
 DIR=/data/local/tmp/edgegest
 LOG=$DIR/edgegest.log
 
+APK=$(pm path com.lcd.edgegest 2>/dev/null | head -n1 | cut -d: -f2)
+if [ -n "$APK" ] && [ -f "$APK" ]; then
+  CP="$APK"
+else
+  CP="$DIR/edgegest.dex"
+fi
+
 PID=$(pidof edgegest)
 if [ -n "$PID" ]; then
   kill $PID
   sleep 1
 fi
 
+mkdir -p $DIR
 : > $LOG
 setsid sh -c "
-  CLASSPATH=$DIR/edgegest.dex app_process /system/bin --nice-name=edgegest com.lcd.edgegest.Main --server --hybrid $* >>$LOG 2>&1
+  CLASSPATH=$CP app_process /system/bin --nice-name=edgegest com.lcd.edgegest.Main --server --hybrid $* >>$LOG 2>&1
   cmd role get-role-holders android.app.role.HOME | grep -q com.miui.home || cmd settings put global force_fsg_nav_bar 0
   echo \"\$(date) server stopped -> navbar restored\" >>$LOG
 " </dev/null >/dev/null 2>&1 &

@@ -23,8 +23,10 @@ New-Item -ItemType Directory -Force "$out\classes" | Out-Null
     -o "$out\base.apk"
 if ($LASTEXITCODE -ne 0) { throw "aapt2 link failed" }
 
-# 2) javac
-$srcs = Get-ChildItem -Recurse "$app\src" -Filter *.java | ForEach-Object { $_.FullName }
+# 2) javac (gồm cả UI/Overlay app/src và Helper src để cài 1 APK duy nhất là đủ)
+$appSrcs = Get-ChildItem -Recurse "$app\src" -Filter *.java | ForEach-Object { $_.FullName }
+$helperSrcs = Get-ChildItem -Recurse "$root\src" -Filter *.java | ForEach-Object { $_.FullName }
+$srcs = @($appSrcs) + @($helperSrcs)
 & javac -source 8 -target 8 -bootclasspath $androidJar -Xlint:-options -encoding UTF-8 -d "$out\classes" @srcs
 if ($LASTEXITCODE -ne 0) { throw "javac failed" }
 
